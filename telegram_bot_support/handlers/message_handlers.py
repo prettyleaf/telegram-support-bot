@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from services.telegram_service import TelegramService
+from telegram_bot_support.services import TelegramService
 
 logger = logging.getLogger(__name__)
 

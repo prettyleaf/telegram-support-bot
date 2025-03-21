@@ -2,7 +2,7 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 
-from app.bot import SupportBot
+from telegram_bot_support.app.bot import SupportBot
 from config import load_config
 
 logging.basicConfig(

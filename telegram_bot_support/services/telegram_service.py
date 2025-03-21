@@ -5,8 +5,8 @@ from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramAPIError
 
-from services.i18n_service import I18nService
-from services.storage_service import StorageService
+from telegram_bot_support.services.i18n_service import I18nService
+from telegram_bot_support.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 

@@ -21,4 +21,4 @@ build-backend = "poetry.core.masonry.api"
 black = "^25.1.0"
 
 [tool.poetry]
-packages = [{ include = "app" }]
+packages = [{ include = "telegram_bot_support" }]
