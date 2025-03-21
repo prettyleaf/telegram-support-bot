@@ -4,9 +4,9 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramAPIError
 
 from telegram_bot_support.handlers.message_handlers import register_handlers
-from telegram_bot_support.services import I18nService
-from telegram_bot_support.services import StorageService
-from telegram_bot_support.services import TelegramService
+from telegram_bot_support.services.i18n_service import I18nService
+from telegram_bot_support.services.storage_service import StorageService
+from telegram_bot_support.services.telegram_service import TelegramService
 
 logger = logging.getLogger(__name__)
 
