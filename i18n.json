@@ -1,8 +1,8 @@
 {
   "ru": {
-    "error_forward_user": "Не удалось отправить сообщение пользователю.",
+    "error_forward_user": "Не удалось отправить сообщение пользователю."
   },
   "en": {
-    "error_forward_user": "Failed to forward message to user.",
+    "error_forward_user": "Failed to forward message to user."
   }
 }
