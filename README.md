@@ -1,5 +1,3 @@
-(Due to technical issues, the search service is temporarily unavailable.)
-
 # Telegram Support Bot 🤖
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
