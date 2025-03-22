@@ -14,30 +14,34 @@ class StorageService:
         self._load_data()
 
     def _load_data(self) -> None:
-        if self.storage_file.exists():
-            try:
-                with open(self.storage_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._topic_by_user = {
-                        int(k): v for k, v in data.get("topic_by_user", {}).items()
-                    }
-                    self._user_by_topic = {
-                        int(k): v for k, v in data.get("user_by_topic", {}).items()
-                    }
-                logger.info(
-                    f"Loaded {len(self._topic_by_user)} user-topic relations from storage"
-                )
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"Error loading data from {self.storage_file}: {e}")
-                self._topic_by_user = {}
-                self._user_by_topic = {}
+        if not self.storage_file.exists():
+            return
+        try:
+            with open(self.storage_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self._topic_by_user = {
+                    int(k): v for k, v in data.get("topic_by_user", {}).items()
+                }
+                self._user_by_topic = {
+                    int(k): v for k, v in data.get("user_by_topic", {}).items()
+                }
+            logger.info(
+                f"Loaded {len(self._topic_by_user)} user-topic relations from storage"
+            )
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Error loading data from {self.storage_file}: {e}")
+            self._topic_by_user = {}
+            self._user_by_topic = {}
 
     async def _save_data(self) -> None:
-        data = {
-            "topic_by_user": {str(k): v for k, v in self._topic_by_user.items()},
-            "user_by_topic": {str(k): v for k, v in self._user_by_topic.items()},
-        }
-        await asyncio.to_thread(self._write_to_file, data)
+        try:
+            data = {
+                "topic_by_user": {str(k): v for k, v in self._topic_by_user.items()},
+                "user_by_topic": {str(k): v for k, v in self._user_by_topic.items()},
+            }
+            await asyncio.to_thread(self._write_to_file, data)
+        except IOError:
+            logger.critical("Critical storage failure: data not saved!")
 
     def _write_to_file(self, data: dict[str, dict[str, int]]) -> None:
         try:
