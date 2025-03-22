@@ -44,7 +44,7 @@ def register_handlers(
         partial(handle_user_message, telegram_service=telegram_service),
         F.chat.type == "private",
         ~F.from_user.is_bot,
-        ~F.text.startswith("/start"),
+        ~F.text.startswith("/"),
     )
 
     router.message.register(
