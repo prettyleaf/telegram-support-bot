@@ -1,28 +1,31 @@
 import json
 import logging
 from functools import lru_cache
-from pathlib import Path
+from importlib.resources import files
 
 logger = logging.getLogger(__name__)
 
 
 class I18nService:
-    def __init__(self, default_lang: str, i18n_file: str = "i18n.json"):
-        self.i18n_file = Path(i18n_file)
+    def __init__(self, default_lang: str):
         self.default_lang = default_lang
         self.translations = {}
         self._load_translations()
 
     def _load_translations(self) -> None:
-        if not self.i18n_file.exists():
-            raise FileNotFoundError(f"i18n file {self.i18n_file} does not exist.")
         try:
-            with self.i18n_file.open("r", encoding="utf-8") as f:
-                self.translations = json.load(f)
-            logger.info(f"Translations loaded from {self.i18n_file}")
+            content = files("telegram_bot_support.data").joinpath("i18n.json").read_text(encoding="utf-8")
+            logger.info(f"Translations loaded.")
+            self.translations = json.loads(content)
+        except FileNotFoundError as e:
+            logger.error(f"i18n.json file not found: {e}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in i18n.json: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Error loading i18n file: {e}")
-            self.translations = {}
+            logger.error(f"Unexpected error: {e}")
+            raise RuntimeError(f"Failed to load translations")
 
     @lru_cache(maxsize=128)
     def get(self, key: str, lang: str = None) -> str:
