@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class SupportBot:
-    def __init__(self, config: dict[str, any], bot: Bot | None = None) -> None:
+    def __init__(self, config: dict[str, any], bot: Bot | None = None, dp: Dispatcher | None = None) -> None:
         self._validate_config(config)
         self.bot = bot if bot else Bot(token=config.get("token"))
         self.storage = StorageService()
@@ -20,7 +20,8 @@ class SupportBot:
         self.i18n = I18nService(default_lang=config.get("lang"))
         self.telegram = TelegramService(self.bot, config, self.storage, self.i18n)
         self.enable_start_command = config.get("enable_start_command", False)
-        self.dispatcher = Dispatcher()
+        self.dispatcher = dp or Dispatcher()
+        self._is_external_dispatcher = dp is not None
 
     @staticmethod
     def _validate_config(config: dict[str, any]) -> None:
@@ -53,4 +54,5 @@ class SupportBot:
         await self._check_support_chat()
         register_handlers(self.router, self.telegram, self.enable_start_command)
         self.dispatcher.include_router(self.router)
-        await self.dispatcher.start_polling(self.bot)
+        if not self._is_external_dispatcher:
+            await self.dispatcher.start_polling(self.bot)
