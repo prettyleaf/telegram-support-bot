@@ -28,6 +28,13 @@ async def handle_support_message(
 async def handle_user_message(
     message: Message, telegram_service: TelegramService
 ) -> None:
+    logger.debug(
+        f"Received message from user {message.from_user.id}: "
+        f"text={message.text}, "
+        f"chat_type={message.chat.type}, "
+        f"via_bot={message.via_bot}, "
+        f"entities={message.entities}"
+    )
     await telegram_service.forward_to_support(message)
 
 
@@ -45,6 +52,7 @@ def register_handlers(
         F.chat.type == "private",
         ~F.from_user.is_bot,
         ~F.text.startswith("/"),
+        ~F.via_bot
     )
 
     router.message.register(
@@ -52,6 +60,7 @@ def register_handlers(
         F.chat.id == telegram_service.support_chat_id,
         F.message_thread_id.is_not(None),
         ~F.from_user.is_bot,
+        ~F.via_bot
     )
 
     logger.info("All message handlers registered")
