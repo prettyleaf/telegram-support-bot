@@ -26,8 +26,11 @@ class TelegramService:
         self.welcome_message: str | None = config.get("welcome_message")
 
     async def get_topic_by_tg_id(self, user_id: int) -> int:
+        logger.debug(f"Checking topic for user {user_id}")
         if topic_id := self.storage.get_topic_id(user_id):
+            logger.debug(f"Found existing topic {topic_id} for user {user_id}")
             return topic_id
+        logger.debug(f"No topic found for user {user_id}, creating new")
         return await self.create_topic_by_tg_id(user_id)
 
     async def create_topic_by_tg_id(self, user_id: int) -> int:
@@ -58,8 +61,8 @@ class TelegramService:
             logger.debug(
                 f"Message forwarded to support: user={user_id}, topic={topic_id}"
             )
-        except Exception as e:
-            logger.error(f"Failed to forward message to support: {e}. Try to create new topic")
+        except TelegramAPIError as e:
+            logger.error(f"Failed to forward message to support: {str(e)}. Try to create new topic")
             await self.storage.delete_relation(user_id)
             await self.create_topic_by_tg_id(user_id)
 
