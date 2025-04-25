@@ -11,6 +11,7 @@ class StorageService:
         self.storage_file = Path(storage_file)
         self._topic_by_user: dict[int, int] = {}
         self._user_by_topic: dict[int, int] = {}
+        self._lock = asyncio.Lock()
         self._load_data()
 
     def _load_data(self) -> None:
@@ -58,14 +59,16 @@ class StorageService:
         return self._user_by_topic.get(topic_id)
 
     async def save_relation(self, user_id: int, topic_id: int) -> None:
-        self._topic_by_user[user_id] = topic_id
-        self._user_by_topic[topic_id] = user_id
-        await self._save_data()
-        logger.info(f"Relation saved: user_id={user_id}, topic_id={topic_id}")
+        async with self._lock:
+            self._topic_by_user[user_id] = topic_id
+            self._user_by_topic[topic_id] = user_id
+            await self._save_data()
+            logger.info(f"Relation saved: user_id={user_id}, topic_id={topic_id}")
 
     async def delete_relation(self, user_id: int) -> None:
-        if user_id in self._topic_by_user:
-            topic_id = self._topic_by_user.pop(user_id)
-            self._user_by_topic.pop(topic_id, None)
-            await self._save_data()
-            logger.info(f"Relation deleted for user_id={user_id}")
+        async with self._lock:
+            if user_id in self._topic_by_user:
+                topic_id = self._topic_by_user.pop(user_id)
+                self._user_by_topic.pop(topic_id, None)
+                await self._save_data()
+                logger.info(f"Relation deleted for user_id={user_id}")
