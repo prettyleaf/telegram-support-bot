@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 async def handle_start(message: Message, telegram_service: TelegramService) -> None:
     if not message.from_user:
         return
-    user_id = message.from_user.id
-    await telegram_service.get_topic_by_tg_id(user_id)
     if telegram_service.welcome_message:
         await message.answer(telegram_service.welcome_message)
 
@@ -52,7 +50,7 @@ def register_handlers(
         F.chat.type == "private",
         ~F.from_user.is_bot,
         ~F.text.startswith("/"),
-        ~F.via_bot
+        F.text | F.caption | F.photo | F.document | F.video | F.audio | F.voice | F.sticker | F.animation
     )
 
     router.message.register(
@@ -60,7 +58,6 @@ def register_handlers(
         F.chat.id == telegram_service.support_chat_id,
         F.message_thread_id.is_not(None),
         ~F.from_user.is_bot,
-        ~F.via_bot
     )
 
     logger.info("All message handlers registered")
