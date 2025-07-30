@@ -1,6 +1,6 @@
 services:
   telegram-support-bot:
-    image: telegram-support-bot:latest
+    image: ghcr.io/prettyleaf/telegram-support-bot:latest
     container_name: telegram-support-bot
     restart: unless-stopped
     # build: .
