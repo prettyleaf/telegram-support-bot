@@ -1,0 +1,12 @@
+services:
+  telegram-support-bot:
+    image: telegram-support-bot:latest
+    container_name: telegram-support-bot
+    restart: unless-stopped
+    # build: .
+    environment:
+      - BOT_TOKEN="YOUR_BOT_TOKEN_HERE"
+      - SUPPORT_CHAT_ID="YOUR_SUPPORT_CHAT_ID_HERE"
+      - ENABLE_START_COMMAND="true"
+      - WELCOME_MESSAGE="Добро пожаловать! Отправьте сообщение для связи с поддержкой."
+      - APP_LANG="ru"
