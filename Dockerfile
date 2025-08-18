@@ -8,7 +8,7 @@ WORKDIR /opt/bot
 COPY requirements.txt .
 
 # Create a virtual environment and install dependencies
-RUN python3.13 -m venv venv && venv/bin/activate && pip install --no-cache-dir -r requirements.txt
+RUN python3.13 -m venv venv && source venv/bin/activate && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application's code into the container at /app
 COPY . .
