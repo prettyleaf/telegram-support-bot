@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.13
+FROM python:3.13-slim
 
 # Set the working directory in the container
 WORKDIR /opt/bot
@@ -8,8 +8,7 @@ WORKDIR /opt/bot
 COPY requirements.txt .
 
 # Create a virtual environment and install dependencies
-RUN python3.13 -m venv venv && \
-    venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN python3.13 -m venv venv && venv/bin/activate && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application's code into the container at /app
 COPY . .
@@ -19,4 +18,4 @@ COPY . .
 #   CMD pgrep -f "python main.py" > /dev/null || exit 1
 
 # Command to run the application
-CMD ["venv/bin/python", "main.py"]
+CMD ["venv/bin/activate", "main.py"]
