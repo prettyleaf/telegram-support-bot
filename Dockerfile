@@ -18,4 +18,4 @@ COPY . .
 #   CMD pgrep -f "python main.py" > /dev/null || exit 1
 
 # Command to run the application
-CMD ["venv/bin/activate", "main.py"]
+CMD ["source venv/bin/activate", "main.py"]
