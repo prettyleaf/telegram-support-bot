@@ -7,8 +7,12 @@ WORKDIR /opt/bot
 # Copy the requirements file into the container at /opt/bot
 COPY requirements.txt .
 
-# Create a virtual environment and install dependencies
-RUN python3.13 -m venv venv && source ./venv/bin/activate && pip install --no-cache-dir -r requirements.txt
+# Create a virtual environment
+RUN python -m venv /opt/bot/venv
+ENV PATH="/opt/bot/venv/bin:$PATH"
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application's code into the container at /app
 COPY . .
@@ -18,4 +22,4 @@ COPY . .
 #   CMD pgrep -f "python main.py" > /dev/null || exit 1
 
 # Command to run the application
-CMD ["source .venv/bin/activate", "main.py"]
+CMD ["python", "main.py"]
