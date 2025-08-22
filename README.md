@@ -1,4 +1,4 @@
-# Telegram Support Bot 🤖
+# Telegram Support Bot (Dockerized) 🤖
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -24,45 +24,21 @@ A simple Telegram bot solution for managing user support requests through forum-
 
 ## Prerequisites 📋
 
-- Python 3.13 or newer
+- Docker & Docker Compose
 - Telegram bot token ([obtain from @BotFather](https://t.me/BotFather))
 - Forum-enabled Telegram group for support team
 
 ## Installation 🚀
 
-1. Clone repository:
+Clone repository:
 ```bash
 git clone https://github.com/fraybyl/telegram-support-bot.git
 cd telegram-support-bot
 ```
 
-2. Create virtual environment:
-```bash
-python -m venv venv
-```
-
-3. Activate virtual environment:
-```bash
-# Unix/macOS
-source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
-```
-
-4. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-5. Configure environment:
-```bash
-cp .env.example .env
-```
-
 ## Configuration ⚙️
 
-Edit `.env` file with your credentials:
+Edit `docker-compose.yml` file with your credentials:
 
 ```ini
 # REQUIRED PARAMETERS
@@ -78,7 +54,7 @@ WELCOME_MESSAGE=How can we assist you today?  # Custom greeting
 ## Launching the Bot 🏁
 
 ```bash
-python main.py
+docker compose up -d
 ```
 
 ## Operational Guide 📖
