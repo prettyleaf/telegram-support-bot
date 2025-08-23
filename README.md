@@ -30,7 +30,7 @@ A simple Telegram bot solution for managing user support requests through forum-
 
 ## Installation 🚀
 
-## Docker 🐳
+### Docker 🐳
 
 1. Clone repository:
 
