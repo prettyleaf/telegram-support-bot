@@ -1,0 +1,260 @@
+// Package app provides the main application structure with dependency injection.
+package app
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"remnafamily/internal/config"
+	"remnafamily/internal/database"
+	"remnafamily/internal/handlers"
+	"remnafamily/internal/services"
+	"remnafamily/internal/state"
+	"remnafamily/internal/types"
+	"remnafamily/internal/utils"
+
+	"github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+)
+
+// App represents the main application with all its dependencies.
+type App struct {
+	Config       *config.Config
+	Bot          *bot.Bot
+	DB           *database.Repository
+	State        *state.AppState
+	deps         *types.Dependencies
+	ctx          context.Context
+	cancelFunc   context.CancelFunc
+	userHandlers *handlers.UserHandlers
+	adminHandlers *handlers.AdminHandlers
+}
+
+// New creates a new application instance with all dependencies initialized.
+func New(ctx context.Context) (*App, error) {
+	// Load configuration from .env
+	if err := config.Load(); err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	// Load YAML configuration
+	yamlConfig, err := config.LoadYAMLConfig("config.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("load YAML config: %w", err)
+	}
+
+	// Store YAML config globally
+	config.YAMLCfg = yamlConfig
+	utils.LogSystem("Configuration loaded (log_level=%s)", yamlConfig.Bot.LogLevel)
+
+	// Update logger level from YAML config
+	if err := utils.UpdateLogLevel(); err != nil {
+		utils.Logger.Warnf("Failed to update log level: %v", err)
+	}
+
+	// Create app context
+	appCtx, cancel := context.WithCancel(ctx)
+
+	// Connect to database
+	if err := database.Connect(appCtx, yamlConfig); err != nil {
+		cancel()
+		return nil, fmt.Errorf("connect to database: %w", err)
+	}
+	utils.LogSystem("Database connected")
+
+	// Run database migrations
+	if err := database.MigrateUp(appCtx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	// Create repository
+	db := database.NewRepository()
+
+	// Create app state
+	appState := state.NewAppState()
+
+	// Add admins to state
+	for _, id := range config.Cfg.AdminIDs {
+		appState.AddAdmin(id)
+	}
+	utils.LogSystem("Loaded %d admins from config", len(config.Cfg.AdminIDs))
+
+	// Create bot instance
+	opts := []bot.Option{
+		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
+			// Default handler - will be overridden
+		}),
+	}
+
+	b, err := bot.New(config.Cfg.BotToken, opts...)
+	if err != nil {
+		database.Close()
+		cancel()
+		return nil, fmt.Errorf("create bot: %w", err)
+	}
+
+	// Create app
+	app := &App{
+		Config:     config.Cfg,
+		Bot:        b,
+		DB:         db,
+		State:      appState,
+		ctx:        appCtx,
+		cancelFunc: cancel,
+	}
+
+	// Create dependencies
+	app.deps = app.createDependencies()
+
+	// Create handlers
+	app.userHandlers = handlers.NewUserHandlers(app.deps)
+	app.adminHandlers = handlers.NewAdminHandlers(app.deps)
+
+	// Register handlers
+	app.registerHandlers()
+
+	return app, nil
+}
+
+// createDependencies creates and initializes all service dependencies.
+func (a *App) createDependencies() *types.Dependencies {
+	return &types.Dependencies{
+		Bot:           a.Bot,
+		DB:            a.DB,
+		State:         a.State,
+		Config:        a.Config,
+		TicketService: services.NewTicketService(a.DB),
+	}
+}
+
+// registerHandlers registers all bot handlers.
+func (a *App) registerHandlers() {
+	// User commands (in private chats)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleStart))
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/newticket", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleNewTicket))
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/mytickets", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleMyTickets))
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/cancel", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleCancel))
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleLanguage))
+
+	// Admin commands
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/help", bot.MatchTypePrefix, a.adminHandlers.HandleAdminHelp)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/tickets", bot.MatchTypePrefix, a.adminHandlers.HandleTickets)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/close", bot.MatchTypePrefix, a.adminHandlers.HandleClose)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/reopen", bot.MatchTypePrefix, a.adminHandlers.HandleReopen)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/priority", bot.MatchTypePrefix, a.adminHandlers.HandlePriority)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/info", bot.MatchTypePrefix, a.adminHandlers.HandleInfo)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/ban", bot.MatchTypePrefix, a.adminHandlers.HandleBan)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/unban", bot.MatchTypePrefix, a.adminHandlers.HandleUnban)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/banned", bot.MatchTypePrefix, a.adminHandlers.HandleBanned)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/note", bot.MatchTypePrefix, a.adminHandlers.HandleNote)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/notes", bot.MatchTypePrefix, a.adminHandlers.HandleNotes)
+
+	// Callback queries
+	a.Bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "", bot.MatchTypePrefix, a.handleCallback)
+
+	// Default message handler
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "", bot.MatchTypePrefix, a.handleMessage)
+}
+
+// handlePrivateCommand wraps a handler to only work in private chats
+func (a *App) handlePrivateCommand(handler func(ctx context.Context, b *bot.Bot, update *models.Update)) bot.HandlerFunc {
+	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		if update.Message == nil {
+			return
+		}
+		if update.Message.Chat.Type != "private" {
+			return
+		}
+		handler(ctx, b, update)
+	}
+}
+
+// handleCallback routes callback queries to the appropriate handler
+func (a *App) handleCallback(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+
+	data := update.CallbackQuery.Data
+	userID := update.CallbackQuery.From.ID
+
+	// Admin callbacks
+	if config.IsAdmin(userID) {
+		// Check if this is an admin-specific callback
+		if strings.HasPrefix(data, "ticket:close") ||
+			strings.HasPrefix(data, "ticket:reopen") ||
+			strings.HasPrefix(data, "ticket:info") ||
+			strings.HasPrefix(data, "ticket:confirmclose") ||
+			strings.HasPrefix(data, "priority:") ||
+			strings.HasPrefix(data, "tickets:") ||
+			strings.HasPrefix(data, "banned:") {
+			a.adminHandlers.HandleAdminCallback(ctx, b, update)
+			return
+		}
+	}
+
+	// User callbacks
+	a.userHandlers.HandleUserCallback(ctx, b, update)
+}
+
+// handleMessage routes messages to the appropriate handler
+func (a *App) handleMessage(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	message := update.Message
+
+	// Skip commands
+	if message.Text != "" && strings.HasPrefix(message.Text, "/") {
+		return
+	}
+
+	// Check if this is in the support chat (admin message)
+	if message.Chat.ID == config.Cfg.SupportChatID {
+		if config.IsAdmin(message.From.ID) {
+			a.adminHandlers.HandleAdminMessage(ctx, b, update)
+		}
+		return
+	}
+
+	// Private chat messages from users
+	if message.Chat.Type == "private" {
+		a.userHandlers.HandleUserMessage(ctx, b, update)
+	}
+}
+
+// Start starts the application.
+func (a *App) Start() error {
+	utils.LogSystem("Bot is starting...")
+	
+	// Get bot info
+	me, err := a.Bot.GetMe(a.ctx)
+	if err != nil {
+		return fmt.Errorf("get bot info: %w", err)
+	}
+	utils.LogSystem("Bot started as @%s", me.Username)
+	utils.LogSystem("Support chat ID: %d", config.Cfg.SupportChatID)
+	utils.LogSystem("Admins: %v", config.Cfg.AdminIDs)
+
+	// Start bot in background
+	go a.Bot.Start(a.ctx)
+
+	return nil
+}
+
+// Stop stops the application gracefully.
+func (a *App) Stop() error {
+	utils.LogSystem("Shutting down...")
+
+	// Cancel context
+	a.cancelFunc()
+
+	// Close database
+	database.Close()
+
+	utils.LogSystem("Shutdown complete")
+	return nil
+}

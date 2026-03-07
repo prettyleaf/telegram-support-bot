@@ -1,0 +1,52 @@
+# Support Ticket Bot Configuration
+# =================================
+
+# Bot settings
+bot:
+  # Log level: debug, info, warn, error
+  log_level: info
+
+# Ticket settings
+tickets:
+  # Auto-close inactive tickets after X hours (0 = disabled)
+  auto_close_hours: 0
+  
+  # Maximum open tickets per user
+  max_open_per_user: 3
+  
+  # Ticket number prefix
+  number_prefix: "TKT"
+  
+  # Enable ticket priority
+  priority_enabled: true
+  
+  # Default priority: low, normal, high, urgent
+  default_priority: normal
+
+# Messages settings
+# DEPRECATED. See /internal/messages/messages.go
+
+# Database settings
+database:
+  # Connection pool settings
+  max_connections: 10
+  min_connections: 2
+  max_conn_lifetime_minutes: 60
+  max_conn_idle_minutes: 30
+  health_check_period_seconds: 30
+
+# Rate limiting
+rate_limit:
+  # Maximum messages per minute from user
+  max_messages_per_minute: 10
+  
+  # Cooldown between ticket creations (seconds)
+  ticket_creation_cooldown: 60
+
+# Thread settings for support chat
+thread:
+  # Topic name format for new tickets
+  name_format: "#{ticket_number} - {user_name}"
+  
+  # Topic icon color (0-6)
+  icon_color: 0

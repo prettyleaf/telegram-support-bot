@@ -1,0 +1,258 @@
+package keyboards
+
+import (
+	"fmt"
+
+	"remnafamily/internal/database"
+
+	"github.com/go-telegram/bot/models"
+)
+
+// NewTicketKeyboard creates the keyboard for starting a new ticket
+func NewTicketKeyboard() *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📝 Create New Ticket", CallbackData: "ticket:create"},
+			},
+		},
+	}
+}
+
+// NewTicketKeyboardRu creates the keyboard for starting a new ticket (Russian)
+func NewTicketKeyboardRu() *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📝 Создать тикет", CallbackData: "ticket:create"},
+			},
+		},
+	}
+}
+
+// LanguageSelectionKeyboard creates the keyboard for language selection
+func LanguageSelectionKeyboard() *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "🇬🇧 English", CallbackData: "lang:en"},
+				{Text: "🇷🇺 Русский", CallbackData: "lang:ru"},
+			},
+		},
+	}
+}
+
+// TicketActionsKeyboard creates the keyboard for ticket actions (admin)
+func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	if isOpen {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: "🔒 Close Ticket", CallbackData: fmt.Sprintf("ticket:close:%d", ticketID)},
+		})
+	} else {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: "🔓 Reopen Ticket", CallbackData: fmt.Sprintf("ticket:reopen:%d", ticketID)},
+		})
+	}
+
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "📊 View Details", CallbackData: fmt.Sprintf("ticket:info:%d", ticketID)},
+	})
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// TicketViewKeyboard creates the keyboard for viewing a ticket from ticket list
+func TicketViewKeyboard(ticketID int, isOpen bool, threadID int64) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	// First row: Open/Close action
+	if isOpen {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: "🔒 Close Ticket", CallbackData: fmt.Sprintf("ticket:close:%d", ticketID)},
+		})
+	} else {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: "🔓 Reopen Ticket", CallbackData: fmt.Sprintf("ticket:reopen:%d", ticketID)},
+		})
+	}
+
+	// Second row: Priority and Notes
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "🎯 Set Priority", CallbackData: fmt.Sprintf("ticket:priority:%d", ticketID)},
+		{Text: "📝 Notes", CallbackData: fmt.Sprintf("ticket:notes:%d", ticketID)},
+	})
+
+	// Third row: Link to topic if thread exists
+	if threadID > 1 {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: "💬 Go to Topic", CallbackData: fmt.Sprintf("ticket:goto:%d", ticketID)},
+		})
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// PriorityKeyboard creates the keyboard for setting ticket priority
+func PriorityKeyboard(ticketID int) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "🔵 Low", CallbackData: fmt.Sprintf("priority:%d:low", ticketID)},
+				{Text: "🟢 Normal", CallbackData: fmt.Sprintf("priority:%d:normal", ticketID)},
+			},
+			{
+				{Text: "🟠 High", CallbackData: fmt.Sprintf("priority:%d:high", ticketID)},
+				{Text: "🔴 Urgent", CallbackData: fmt.Sprintf("priority:%d:urgent", ticketID)},
+			},
+		},
+	}
+}
+
+// TicketListKeyboard creates the keyboard for ticket list (admin)
+func TicketListKeyboard(tickets []*database.Ticket, page int) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	for _, t := range tickets {
+		statusEmoji := "🟢"
+		if t.Status == "closed" {
+			statusEmoji = "🔴"
+		}
+		
+		text := fmt.Sprintf("%s #%s - %s", statusEmoji, t.TicketNumber, t.GetDisplayName())
+		if len(text) > 40 {
+			text = text[:37] + "..."
+		}
+		
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: text, CallbackData: fmt.Sprintf("ticket:view:%d", t.ID)},
+		})
+	}
+
+	// Pagination
+	var navButtons []models.InlineKeyboardButton
+	if page > 0 {
+		navButtons = append(navButtons, models.InlineKeyboardButton{
+			Text: "⬅️ Previous", CallbackData: fmt.Sprintf("tickets:page:%d", page-1),
+		})
+	}
+	navButtons = append(navButtons, models.InlineKeyboardButton{
+		Text: "🔄 Refresh", CallbackData: "tickets:refresh",
+	})
+	if len(tickets) == 10 { // Assume more pages if we got a full page
+		navButtons = append(navButtons, models.InlineKeyboardButton{
+			Text: "➡️ Next", CallbackData: fmt.Sprintf("tickets:page:%d", page+1),
+		})
+	}
+	
+	if len(navButtons) > 0 {
+		buttons = append(buttons, navButtons)
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// UserTicketListKeyboard creates the keyboard for user's ticket list
+func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	for _, t := range tickets {
+		statusEmoji := "🟢"
+		if t.Status == "closed" {
+			statusEmoji = "🔴"
+		}
+		
+		text := fmt.Sprintf("%s #%s", statusEmoji, t.TicketNumber)
+		if t.Subject != nil && *t.Subject != "" {
+			subject := *t.Subject
+			if len(subject) > 20 {
+				subject = subject[:17] + "..."
+			}
+			text += " - " + subject
+		}
+		
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: text, CallbackData: fmt.Sprintf("myticket:view:%d", t.ID)},
+		})
+	}
+
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "📝 Create New Ticket", CallbackData: "ticket:create"},
+	})
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// ConfirmCloseKeyboard creates confirmation keyboard for closing ticket
+func ConfirmCloseKeyboard(ticketID int) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "✅ Yes, Close", CallbackData: fmt.Sprintf("ticket:confirmclose:%d", ticketID)},
+				{Text: "❌ Cancel", CallbackData: "ticket:cancelclose"},
+			},
+		},
+	}
+}
+
+// BannedUsersKeyboard creates keyboard for banned users list
+func BannedUsersKeyboard(users []*database.BannedUser) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	for _, u := range users {
+		displayName := fmt.Sprintf("%d", u.UserID)
+		if u.UserUsername != nil && *u.UserUsername != "" {
+			displayName = "@" + *u.UserUsername
+		} else if u.UserName != nil && *u.UserName != "" {
+			displayName = *u.UserName
+		}
+		
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: fmt.Sprintf("🚫 %s", displayName), CallbackData: fmt.Sprintf("banned:view:%d", u.UserID)},
+		})
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// CannedResponsesKeyboard creates keyboard for canned responses
+func CannedResponsesKeyboard(responses []*database.CannedResponse) *models.InlineKeyboardMarkup {
+	var buttons [][]models.InlineKeyboardButton
+
+	for _, r := range responses {
+		text := fmt.Sprintf("/%s - %s", r.Shortcut, r.Title)
+		if len(text) > 40 {
+			text = text[:37] + "..."
+		}
+		
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: text, CallbackData: fmt.Sprintf("canned:use:%s", r.Shortcut)},
+		})
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// CancelKeyboard creates a simple cancel button
+func CancelKeyboard() *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "❌ Cancel", CallbackData: "cancel"},
+			},
+		},
+	}
+}
