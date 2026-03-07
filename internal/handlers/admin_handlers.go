@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
@@ -49,91 +50,317 @@ func (h *AdminHandlers) HandleTickets(ctx context.Context, b *bot.Bot, update *m
 	if update.Message == nil || update.Message.From == nil {
 		return
 	}
-
-	utils.LogDebug("HandleTickets called by user %d", update.Message.From.ID)
-
 	if !config.IsAdmin(update.Message.From.ID) {
-		utils.LogDebug("User %d is not admin, ignoring", update.Message.From.ID)
 		return
 	}
 
-	utils.LogDebug("Processing /tickets command")
+	page, filter := parseTicketListArgs(update.Message.Text)
+	if err := h.sendTicketList(ctx, b, update.Message.Chat.ID, update.Message.MessageThreadID, page, filter, 0); err != nil {
+		utils.LogError("send ticket list", err)
+	}
+}
 
-	// Parse arguments: /tickets [page] [filter]
-	// filter can be: all, open, closed (default: all)
-	page := 1
-	filter := "all"
+// HandleStats handles the /stats command.
+func (h *AdminHandlers) HandleStats(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+	if !config.IsAdmin(update.Message.From.ID) {
+		return
+	}
+
+	days := 7
 	parts := strings.Fields(update.Message.Text)
-	
-	for i := 1; i < len(parts); i++ {
-		if p, err := strconv.Atoi(parts[i]); err == nil && p > 0 {
-			page = p
-		} else if parts[i] == "open" || parts[i] == "closed" || parts[i] == "all" {
-			filter = parts[i]
+	if len(parts) >= 2 {
+		parsedDays, err := strconv.Atoi(parts[1])
+		if err != nil || parsedDays <= 0 {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:          update.Message.Chat.ID,
+				MessageThreadID: update.Message.MessageThreadID,
+				Text:            "❌ Usage: /stats [days]",
+				ParseMode:       models.ParseModeHTML,
+			})
+			return
 		}
+		days = parsedDays
 	}
 
-	const pageSize = 10
-	offset := (page - 1) * pageSize
+	endDate := time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
+	startDate := endDate.AddDate(0, 0, -days)
 
-	var tickets []*database.Ticket
-	var err error
-
-	switch filter {
-	case "open":
-		tickets, err = h.deps.TicketService.GetAllOpenTickets(ctx)
-	case "closed":
-		tickets, err = h.deps.TicketService.GetClosedTickets(ctx, pageSize+1, offset)
-	default: // "all"
-		tickets, err = h.deps.TicketService.GetAllTickets(ctx, pageSize+1, offset)
-	}
-
-	utils.LogDebug("Got %d tickets, err: %v", len(tickets), err)
-
+	stats, err := h.deps.TicketService.GetTicketStats(ctx, startDate, endDate)
 	if err != nil {
-		utils.LogError("get tickets", err)
+		utils.LogError("get ticket stats", err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    update.Message.Chat.ID,
-			Text:      "❌ Failed to load tickets.",
-			ParseMode: models.ParseModeHTML,
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Failed to load ticket statistics.",
+			ParseMode:       models.ParseModeHTML,
 		})
 		return
 	}
 
-	hasNextPage := len(tickets) > pageSize
-	if hasNextPage {
-		tickets = tickets[:pageSize]
-	}
-
-	totalPages := page
-	if hasNextPage {
-		totalPages = page + 1
-	}
-
-	text := messages.FormatAllTicketList(tickets, page, totalPages)
-	
-	// Add filter and navigation hints
-	text += fmt.Sprintf("\n<i>Filter: %s</i>", filter)
-	if hasNextPage || page > 1 {
-		text += "\n<i>Use /tickets [page] [open|closed|all]</i>"
-	}
-
-	// Sanitize text to ensure valid UTF-8 (in case DB has corrupted data)
-	text = utils.SanitizeUTF8(text)
-
-	utils.LogDebug("Sending message, text length: %d, chat: %d", len(text), update.Message.Chat.ID)
-
-	resp, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:      update.Message.Chat.ID,
-		Text:        text,
-		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: keyboards.TicketListKeyboard(tickets, page),
-	})
+	openCount, err := h.deps.TicketService.CountTicketsByFilter(ctx, "open")
 	if err != nil {
-		utils.LogError("send tickets message", err)
-	} else {
-		utils.LogDebug("Message sent successfully, message_id: %d", resp.ID)
+		utils.LogError("count open tickets", err)
+		openCount = 0
 	}
+
+	closedCount, err := h.deps.TicketService.CountTicketsByFilter(ctx, "closed")
+	if err != nil {
+		utils.LogError("count closed tickets", err)
+		closedCount = 0
+	}
+
+	text := fmt.Sprintf(
+		"📈 <b>Ticket Statistics</b>\n\n"+
+			"🗓️ <b>Period:</b> last %d day(s)\n"+
+			"📬 <b>Opened:</b> %d\n"+
+			"🔒 <b>Closed:</b> %d\n"+
+			"🟢 <b>Currently Open:</b> %d\n"+
+			"📦 <b>Total Closed:</b> %d",
+		days,
+		stats.TicketsOpened,
+		stats.TicketsClosed,
+		openCount,
+		closedCount,
+	)
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            text,
+		ParseMode:       models.ParseModeHTML,
+	})
+}
+
+// HandleCanned handles the /canned command.
+func (h *AdminHandlers) HandleCanned(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+	if !config.IsAdmin(update.Message.From.ID) {
+		return
+	}
+
+	responses, err := h.deps.TicketService.GetAllCannedResponses(ctx)
+	if err != nil {
+		utils.LogError("get canned responses", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Failed to load canned responses.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	if len(responses) == 0 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "📭 No canned responses configured.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🗂️ <b>Canned Responses</b>\n\n")
+	for _, response := range responses {
+		sb.WriteString(fmt.Sprintf("• <code>/%s</code> - %s\n", utils.EscapeHTML(response.Shortcut), utils.EscapeHTML(response.Title)))
+	}
+	sb.WriteString("\n<i>Use /shortcut inside a ticket thread to send a canned reply.</i>")
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            sb.String(),
+		ParseMode:       models.ParseModeHTML,
+		ReplyMarkup:     keyboards.CannedResponsesKeyboard(responses),
+	})
+}
+
+// HandleAddCanned handles the /addcanned command.
+func (h *AdminHandlers) HandleAddCanned(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+	if !config.IsAdmin(update.Message.From.ID) {
+		return
+	}
+
+	command := firstField(update.Message.Text)
+	payload := strings.TrimSpace(strings.TrimPrefix(update.Message.Text, command))
+	parts := strings.SplitN(payload, "|", 2)
+	if len(parts) != 2 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Usage: /addcanned [shortcut] [title] | [content]",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	left := strings.Fields(strings.TrimSpace(parts[0]))
+	if len(left) < 2 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Usage: /addcanned [shortcut] [title] | [content]",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	shortcut := sanitizeShortcut(left[0])
+	title := strings.TrimSpace(strings.Join(left[1:], " "))
+	content := strings.TrimSpace(parts[1])
+	if shortcut == "" || title == "" || content == "" {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Shortcut, title, and content are all required.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+	if !isValidShortcut(shortcut) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Shortcut must use only letters, numbers, and underscores.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	err := h.deps.TicketService.CreateCannedResponse(ctx, shortcut, title, content, update.Message.From.ID)
+	if err != nil {
+		utils.LogError("create canned response", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Failed to save canned response. The shortcut may already exist.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            fmt.Sprintf("✅ Saved canned response <code>/%s</code>.", shortcut),
+		ParseMode:       models.ParseModeHTML,
+	})
+}
+
+// HandleDelCanned handles the /delcanned command.
+func (h *AdminHandlers) HandleDelCanned(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+	if !config.IsAdmin(update.Message.From.ID) {
+		return
+	}
+
+	parts := strings.Fields(update.Message.Text)
+	if len(parts) < 2 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Usage: /delcanned [shortcut]",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	shortcut := sanitizeShortcut(parts[1])
+	if shortcut == "" || !isValidShortcut(shortcut) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Invalid canned response shortcut.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	if err := h.deps.TicketService.DeleteCannedResponse(ctx, shortcut); err != nil {
+		utils.LogError("delete canned response", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "❌ Failed to delete canned response.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          update.Message.Chat.ID,
+		MessageThreadID: update.Message.MessageThreadID,
+		Text:            fmt.Sprintf("✅ Deleted canned response <code>/%s</code>.", shortcut),
+		ParseMode:       models.ParseModeHTML,
+	})
+}
+
+// HandleAdminDynamicCommand handles unknown slash commands in admin ticket threads.
+func (h *AdminHandlers) HandleAdminDynamicCommand(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	message := update.Message
+	if !config.IsAdmin(message.From.ID) || message.Chat.ID != config.Cfg.SupportChatID {
+		return
+	}
+
+	command := extractCommandName(message.Text)
+	if command == "" || isBuiltInAdminCommand(command) {
+		return
+	}
+
+	response, err := h.deps.TicketService.GetCannedResponse(ctx, command)
+	if err != nil || response == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          message.Chat.ID,
+			MessageThreadID: message.MessageThreadID,
+			Text:            fmt.Sprintf("❌ Unknown admin command or canned response: <code>/%s</code>", utils.EscapeHTML(command)),
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	ticket, err := h.getTicketFromMessage(ctx, message)
+	if err != nil || ticket == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          message.Chat.ID,
+			MessageThreadID: message.MessageThreadID,
+			Text:            "❌ Canned responses can only be sent from a ticket thread.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	originalMessageID := int64(message.ID)
+	if err := h.sendCannedResponseToTicket(ctx, b, ticket, message.From, response, &originalMessageID); err != nil {
+		utils.LogError("send canned response", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          message.Chat.ID,
+			MessageThreadID: message.MessageThreadID,
+			Text:            "❌ Failed to send canned response to the user.",
+			ParseMode:       models.ParseModeHTML,
+		})
+		return
+	}
+
+	_, _ = b.SetMessageReaction(ctx, &bot.SetMessageReactionParams{
+		ChatID:    message.Chat.ID,
+		MessageID: message.ID,
+		Reaction:  []models.ReactionType{{Type: "emoji", ReactionTypeEmoji: &models.ReactionTypeEmoji{Emoji: "✅"}}},
+	})
 }
 
 // HandleClose handles the /close command
@@ -170,6 +397,7 @@ func (h *AdminHandlers) HandleClose(ctx context.Context, b *bot.Bot, update *mod
 	}
 
 	adminName := utils.GetUserFullName(admin)
+	adminNameHTML := utils.EscapeHTML(adminName)
 
 	err = h.deps.TicketService.CloseTicket(ctx, b, ticket.ID, admin.ID, adminName)
 	if err != nil {
@@ -189,7 +417,7 @@ func (h *AdminHandlers) HandleClose(ctx context.Context, b *bot.Bot, update *mod
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            fmt.Sprintf("🔒 <b>Ticket #%s closed by %s</b>", ticket.TicketNumber, adminName),
+		Text:            fmt.Sprintf("🔒 <b>Ticket #%s closed by %s</b>", ticket.TicketNumber, adminNameHTML),
 		ParseMode:       models.ParseModeHTML,
 		ReplyMarkup:     keyboards.TicketActionsKeyboard(ticket.ID, false),
 	})
@@ -199,7 +427,7 @@ func (h *AdminHandlers) HandleClose(ctx context.Context, b *bot.Bot, update *mod
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
-			Text:            fmt.Sprintf("🔒 <b>Ticket closed by %s</b>", adminName),
+			Text:            fmt.Sprintf("🔒 <b>Ticket closed by %s</b>", adminNameHTML),
 			ParseMode:       models.ParseModeHTML,
 		})
 	}
@@ -261,13 +489,14 @@ func (h *AdminHandlers) HandleReopen(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	adminName := utils.GetUserDisplayName(admin)
+	adminNameHTML := utils.EscapeHTML(adminName)
 	utils.LogTicket("Ticket #%s reopened by %s", ticket.TicketNumber, adminName)
 
 	// Notify in thread
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            fmt.Sprintf("🔓 <b>Ticket reopened by %s</b>", adminName),
+		Text:            fmt.Sprintf("🔓 <b>Ticket reopened by %s</b>", adminNameHTML),
 		ParseMode:       models.ParseModeHTML,
 		ReplyMarkup:     keyboards.TicketActionsKeyboard(ticket.ID, true),
 	})
@@ -287,6 +516,15 @@ func (h *AdminHandlers) HandlePriority(ctx context.Context, b *bot.Bot, update *
 	}
 
 	if !config.IsAdmin(update.Message.From.ID) {
+		return
+	}
+	if config.YAMLCfg != nil && !config.YAMLCfg.Tickets.PriorityEnabled {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          update.Message.Chat.ID,
+			MessageThreadID: update.Message.MessageThreadID,
+			Text:            "⚠️ Ticket priority changes are disabled in configuration.",
+			ParseMode:       models.ParseModeHTML,
+		})
 		return
 	}
 
@@ -392,7 +630,7 @@ func (h *AdminHandlers) HandleInfo(ctx context.Context, b *bot.Bot, update *mode
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            messages.FormatTicketDetails(ticket),
+		Text:            messages.FormatTicketDetailsForAdmin(ticket),
 		ParseMode:       models.ParseModeHTML,
 		ReplyMarkup:     keyboards.TicketActionsKeyboard(ticket.ID, ticket.IsOpen()),
 	})
@@ -545,13 +783,13 @@ func (h *AdminHandlers) HandleBanned(ctx context.Context, b *bot.Bot, update *mo
 	for _, u := range users {
 		displayName := fmt.Sprintf("<code>%d</code>", u.UserID)
 		if u.UserUsername != nil && *u.UserUsername != "" {
-			displayName = "@" + *u.UserUsername
+			displayName = "@" + utils.EscapeHTML(*u.UserUsername)
 		} else if u.UserName != nil && *u.UserName != "" {
-			displayName = *u.UserName
+			displayName = utils.EscapeHTML(*u.UserName)
 		}
 		sb.WriteString(fmt.Sprintf("• %s", displayName))
 		if u.Reason != nil && *u.Reason != "" {
-			sb.WriteString(fmt.Sprintf(" - %s", *u.Reason))
+			sb.WriteString(fmt.Sprintf(" - %s", utils.EscapeHTML(*u.Reason)))
 		}
 		sb.WriteString("\n")
 	}
@@ -560,6 +798,7 @@ func (h *AdminHandlers) HandleBanned(ctx context.Context, b *bot.Bot, update *mo
 		ChatID:    update.Message.Chat.ID,
 		Text:      sb.String(),
 		ParseMode: models.ParseModeHTML,
+		ReplyMarkup: keyboards.BannedUsersKeyboard(users),
 	})
 }
 
@@ -684,12 +923,12 @@ func (h *AdminHandlers) HandleNotes(ctx context.Context, b *bot.Bot, update *mod
 	for _, n := range notes {
 		adminName := "Admin"
 		if n.AdminName != nil {
-			adminName = *n.AdminName
+			adminName = utils.EscapeHTML(*n.AdminName)
 		}
 		sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s):\n%s\n\n",
 			adminName,
 			n.CreatedAt.Format("02 Jan 15:04"),
-			n.NoteText))
+			utils.EscapeHTML(n.NoteText)))
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -730,7 +969,7 @@ func (h *AdminHandlers) HandleAdminMessage(ctx context.Context, b *bot.Bot, upda
 
 	// Get ticket from thread
 	ticket, err := h.deps.TicketService.GetTicketByThreadID(ctx, int64(message.MessageThreadID))
-	if err != nil {
+	if err != nil || ticket == nil {
 		return // Not a ticket thread
 	}
 
@@ -815,182 +1054,505 @@ func (h *AdminHandlers) HandleAdminCallback(ctx context.Context, b *bot.Bot, upd
 
 	switch parts[0] {
 	case "ticket":
-		if len(parts) < 3 {
-			return
-		}
-		
-		action := parts[1]
-		ticketID, err := strconv.Atoi(parts[2])
-		if err != nil {
-			return
-		}
-
-		ticket, err := h.deps.TicketService.GetTicketByID(ctx, ticketID)
-		if err != nil {
-			return
-		}
-
-		switch action {
-		case "view":
-			// Show ticket details with action buttons
-			isOpen := ticket.Status == "open"
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:      callback.Message.Message.Chat.ID,
-				Text:        messages.FormatTicketDetails(ticket),
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: keyboards.TicketViewKeyboard(ticket.ID, isOpen, ticket.ThreadID),
-			})
-			
-		case "close", "confirmclose":
-			adminName := utils.GetUserFullName(&callback.From)
-			err = h.deps.TicketService.CloseTicket(ctx, b, ticketID, adminID, adminName)
-			if err != nil {
-				utils.LogError("close ticket via callback", err)
-				return
-			}
-
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:      callback.Message.Message.Chat.ID,
-				MessageID:   callback.Message.Message.ID,
-				Text:        fmt.Sprintf("🔒 <b>Ticket closed by %s</b>", adminName),
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: keyboards.TicketActionsKeyboard(ticketID, false),
-			})
-
-			// Notify user
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:    ticket.UserID,
-				Text:      messages.GetTicketClosedMessage(ticket.TicketNumber),
-				ParseMode: models.ParseModeHTML,
-			})
-
-			h.deps.State.ClearUserState(ticket.UserID)
-
-		case "reopen":
-			err = h.deps.TicketService.ReopenTicket(ctx, b, ticketID)
-			if err != nil {
-				utils.LogError("reopen ticket via callback", err)
-				return
-			}
-
-			adminName := utils.GetUserDisplayName(&callback.From)
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:      callback.Message.Message.Chat.ID,
-				MessageID:   callback.Message.Message.ID,
-				Text:        fmt.Sprintf("🔓 <b>Ticket reopened by %s</b>", adminName),
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: keyboards.TicketActionsKeyboard(ticketID, true),
-			})
-
-			// Notify user
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:    ticket.UserID,
-				Text:      messages.GetTicketReopenedMessage(ticket.TicketNumber),
-				ParseMode: models.ParseModeHTML,
-			})
-
-		case "info":
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:          callback.Message.Message.Chat.ID,
-				MessageThreadID: callback.Message.Message.MessageThreadID,
-				Text:            messages.FormatTicketDetails(ticket),
-				ParseMode:       models.ParseModeHTML,
-			})
-
-		case "priority":
-			// Show priority selection keyboard
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:      callback.Message.Message.Chat.ID,
-				Text:        fmt.Sprintf("🎯 Select priority for ticket #%s:", ticket.TicketNumber),
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: keyboards.PriorityKeyboard(ticketID),
-			})
-
-		case "notes":
-			// Show ticket notes
-			notes, err := h.deps.TicketService.GetTicketNotes(ctx, ticketID)
-			if err != nil {
-				utils.LogError("get notes via callback", err)
-				return
-			}
-
-			if len(notes) == 0 {
-				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-					ChatID:    callback.Message.Message.Chat.ID,
-					Text:      fmt.Sprintf("📭 No notes for ticket #%s.", ticket.TicketNumber),
-					ParseMode: models.ParseModeHTML,
-				})
-				return
-			}
-
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("📝 <b>Notes for Ticket #%s:</b>\n\n", ticket.TicketNumber))
-			for _, n := range notes {
-				adminName := "Admin"
-				if n.AdminName != nil {
-					adminName = *n.AdminName
-				}
-				sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s):\n%s\n\n",
-					adminName,
-					n.CreatedAt.Format("02 Jan 15:04"),
-					n.NoteText))
-			}
-
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:    callback.Message.Message.Chat.ID,
-				Text:      sb.String(),
-				ParseMode: models.ParseModeHTML,
-			})
-
-		case "goto":
-			// Send a link to the topic
-			if ticket.ThreadID > 1 {
-				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-					ChatID:    callback.Message.Message.Chat.ID,
-					Text:      fmt.Sprintf("💬 <a href=\"https://t.me/c/%d/%d\">Go to ticket #%s topic</a>", -config.Cfg.SupportChatID - 1000000000000, ticket.ThreadID, ticket.TicketNumber),
-					ParseMode: models.ParseModeHTML,
-				})
-			}
-		}
+		h.handleTicketCallback(ctx, b, callback, adminID, parts)
 
 	case "priority":
-		if len(parts) < 3 {
-			return
-		}
-		ticketID, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return
-		}
-		priority := parts[2]
+		h.handlePriorityCallback(ctx, b, callback, parts)
 
-		err = h.deps.TicketService.UpdateTicketPriority(ctx, ticketID, priority)
-		if err != nil {
-			utils.LogError("update priority via callback", err)
+	case "tickets":
+		h.handleTicketsCallback(ctx, b, callback, parts)
+	case "banned":
+		h.handleBannedCallback(ctx, b, callback, parts)
+	case "canned":
+		h.handleCannedCallback(ctx, b, callback, parts)
+	}
+}
+
+func (h *AdminHandlers) handleTicketCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, adminID int64, parts []string) {
+	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+		return
+	}
+
+	action := parts[1]
+	ticketID, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return
+	}
+
+	ticket, err := h.deps.TicketService.GetTicketByID(ctx, ticketID)
+	if err != nil || ticket == nil {
+		return
+	}
+
+	chatID := callback.Message.Message.Chat.ID
+	messageID := callback.Message.Message.ID
+	threadID := callback.Message.Message.MessageThreadID
+
+	switch action {
+	case "view":
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: threadID,
+			Text:            messages.FormatTicketDetailsForAdmin(ticket),
+			ParseMode:       models.ParseModeHTML,
+			ReplyMarkup:     keyboards.TicketViewKeyboard(ticket.ID, ticket.IsOpen(), ticket.ThreadID),
+		})
+
+	case "close":
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      chatID,
+			MessageID:   messageID,
+			Text:        fmt.Sprintf("⚠️ <b>Close ticket #%s?</b>", ticket.TicketNumber),
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.ConfirmCloseKeyboard(ticket.ID),
+		})
+
+	case "cancelclose":
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      chatID,
+			MessageID:   messageID,
+			Text:        messages.FormatTicketDetailsForAdmin(ticket),
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.TicketViewKeyboard(ticket.ID, ticket.IsOpen(), ticket.ThreadID),
+		})
+
+	case "confirmclose":
+		adminName := utils.GetUserFullName(&callback.From)
+		adminNameHTML := utils.EscapeHTML(adminName)
+		if err := h.deps.TicketService.CloseTicket(ctx, b, ticketID, adminID, adminName); err != nil {
+			utils.LogError("close ticket via callback", err)
 			return
 		}
 
 		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-			ChatID:    callback.Message.Message.Chat.ID,
-			MessageID: callback.Message.Message.ID,
-			Text:      fmt.Sprintf("✅ Priority set to <b>%s</b>", priority),
+			ChatID:      chatID,
+			MessageID:   messageID,
+			Text:        fmt.Sprintf("🔒 <b>Ticket closed by %s</b>", adminNameHTML),
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.TicketActionsKeyboard(ticketID, false),
+		})
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    ticket.UserID,
+			Text:      messages.GetTicketClosedMessage(ticket.TicketNumber),
 			ParseMode: models.ParseModeHTML,
 		})
 
-	case "tickets":
-		if len(parts) >= 2 && parts[1] == "refresh" {
-			tickets, err := h.deps.TicketService.GetAllOpenTickets(ctx)
-			if err != nil {
-				return
-			}
+		h.deps.State.ClearUserState(ticket.UserID)
 
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:      callback.Message.Message.Chat.ID,
-				MessageID:   callback.Message.Message.ID,
-				Text:        messages.FormatAdminTicketList(tickets),
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: keyboards.TicketListKeyboard(tickets, 0),
-			})
+	case "reopen":
+		if err := h.deps.TicketService.ReopenTicket(ctx, b, ticketID); err != nil {
+			utils.LogError("reopen ticket via callback", err)
+			return
 		}
+
+		adminName := utils.GetUserDisplayName(&callback.From)
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      chatID,
+			MessageID:   messageID,
+			Text:        fmt.Sprintf("🔓 <b>Ticket reopened by %s</b>", utils.EscapeHTML(adminName)),
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.TicketActionsKeyboard(ticketID, true),
+		})
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    ticket.UserID,
+			Text:      messages.GetTicketReopenedMessage(ticket.TicketNumber),
+			ParseMode: models.ParseModeHTML,
+		})
+
+	case "info":
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: threadID,
+			Text:            messages.FormatTicketDetailsForAdmin(ticket),
+			ParseMode:       models.ParseModeHTML,
+		})
+
+	case "priority":
+		if config.YAMLCfg != nil && !config.YAMLCfg.Tickets.PriorityEnabled {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:          chatID,
+				MessageThreadID: threadID,
+				Text:            "⚠️ Ticket priority changes are disabled in configuration.",
+				ParseMode:       models.ParseModeHTML,
+			})
+			return
+		}
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: threadID,
+			Text:            fmt.Sprintf("🎯 Select priority for ticket #%s:", ticket.TicketNumber),
+			ParseMode:       models.ParseModeHTML,
+			ReplyMarkup:     keyboards.PriorityKeyboard(ticketID),
+		})
+
+	case "notes":
+		notes, err := h.deps.TicketService.GetTicketNotes(ctx, ticketID)
+		if err != nil {
+			utils.LogError("get notes via callback", err)
+			return
+		}
+
+		if len(notes) == 0 {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:          chatID,
+				MessageThreadID: threadID,
+				Text:            fmt.Sprintf("📭 No notes for ticket #%s.", ticket.TicketNumber),
+				ParseMode:       models.ParseModeHTML,
+			})
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📝 <b>Notes for Ticket #%s:</b>\n\n", ticket.TicketNumber))
+		for _, note := range notes {
+			adminName := "Admin"
+			if note.AdminName != nil {
+				adminName = utils.EscapeHTML(*note.AdminName)
+			}
+			sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s):\n%s\n\n",
+				adminName,
+				note.CreatedAt.Format("02 Jan 15:04"),
+				utils.EscapeHTML(note.NoteText)))
+		}
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: threadID,
+			Text:            sb.String(),
+			ParseMode:       models.ParseModeHTML,
+		})
+
+	case "goto":
+		if ticket.ThreadID <= 1 {
+			return
+		}
+
+		internalChatID := strings.TrimPrefix(strconv.FormatInt(-config.Cfg.SupportChatID, 10), "100")
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          chatID,
+			MessageThreadID: threadID,
+			Text:            fmt.Sprintf("💬 <a href=\"https://t.me/c/%s/%d\">Go to ticket #%s topic</a>", internalChatID, ticket.ThreadID, ticket.TicketNumber),
+			ParseMode:       models.ParseModeHTML,
+		})
+	}
+}
+
+func (h *AdminHandlers) handlePriorityCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
+	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+		return
+	}
+	if config.YAMLCfg != nil && !config.YAMLCfg.Tickets.PriorityEnabled {
+		return
+	}
+
+	ticketID, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return
+	}
+	priority := parts[2]
+
+	if err := h.deps.TicketService.UpdateTicketPriority(ctx, ticketID, priority); err != nil {
+		utils.LogError("update priority via callback", err)
+		return
+	}
+
+	_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:    callback.Message.Message.Chat.ID,
+		MessageID: callback.Message.Message.ID,
+		Text:      fmt.Sprintf("✅ Priority set to <b>%s</b>", priority),
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+func (h *AdminHandlers) handleTicketsCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
+	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 2 {
+		return
+	}
+
+	filter := "all"
+	page := 1
+
+	switch parts[1] {
+	case "page":
+		if len(parts) >= 3 {
+			if parsedPage, err := strconv.Atoi(parts[2]); err == nil && parsedPage > 0 {
+				page = parsedPage
+			}
+		}
+		if len(parts) >= 4 {
+			filter = normalizeTicketFilter(parts[3])
+		}
+	case "refresh":
+		if len(parts) >= 3 {
+			filter = normalizeTicketFilter(parts[2])
+		}
+		if len(parts) >= 4 {
+			if parsedPage, err := strconv.Atoi(parts[3]); err == nil && parsedPage > 0 {
+				page = parsedPage
+			}
+		}
+	default:
+		return
+	}
+
+	if err := h.sendTicketList(ctx, b, callback.Message.Message.Chat.ID, callback.Message.Message.MessageThreadID, page, filter, callback.Message.Message.ID); err != nil {
+		utils.LogError("refresh ticket list", err)
+	}
+}
+
+func (h *AdminHandlers) handleBannedCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
+	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+		return
+	}
+
+	userID, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return
+	}
+
+	switch parts[1] {
+	case "view":
+		ban, err := h.deps.TicketService.GetBannedUser(ctx, userID)
+		if err != nil || ban == nil {
+			return
+		}
+
+		displayName := fmt.Sprintf("<code>%d</code>", ban.UserID)
+		if ban.UserUsername != nil && *ban.UserUsername != "" {
+			displayName = "@" + utils.EscapeHTML(*ban.UserUsername)
+		} else if ban.UserName != nil && *ban.UserName != "" {
+			displayName = utils.EscapeHTML(*ban.UserName)
+		}
+
+		reason := "No reason provided."
+		if ban.Reason != nil && *ban.Reason != "" {
+			reason = utils.EscapeHTML(*ban.Reason)
+		}
+
+		text := fmt.Sprintf(
+			"🚫 <b>Banned User</b>\n\n"+
+				"👤 <b>User:</b> %s\n"+
+				"🆔 <b>ID:</b> <code>%d</code>\n"+
+				"📝 <b>Reason:</b> %s\n"+
+				"📅 <b>Banned At:</b> %s",
+			displayName,
+			ban.UserID,
+			reason,
+			ban.BannedAt.Format("02 Jan 2006 15:04"),
+		)
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:      callback.Message.Message.Chat.ID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.BannedUserActionsKeyboard(userID),
+		})
+
+	case "unban":
+		if err := h.deps.TicketService.UnbanUser(ctx, userID); err != nil {
+			utils.LogError("unban user via callback", err)
+			return
+		}
+
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    callback.Message.Message.Chat.ID,
+			Text:      fmt.Sprintf("✅ User <code>%d</code> has been unbanned.", userID),
+			ParseMode: models.ParseModeHTML,
+		})
+	}
+}
+
+func (h *AdminHandlers) handleCannedCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
+	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 || parts[1] != "use" {
+		return
+	}
+
+	shortcut := sanitizeShortcut(parts[2])
+	if shortcut == "" {
+		return
+	}
+
+	response, err := h.deps.TicketService.GetCannedResponse(ctx, shortcut)
+	if err != nil || response == nil {
+		return
+	}
+
+	ticket, err := h.getTicketFromMessage(ctx, callback.Message.Message)
+	if err != nil || ticket == nil {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    callback.Message.Message.Chat.ID,
+			Text:      fmt.Sprintf("📝 <b>%s</b>\n\n%s", utils.EscapeHTML(response.Title), utils.EscapeHTML(response.Content)),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	if err := h.sendCannedResponseToTicket(ctx, b, ticket, &callback.From, response, nil); err != nil {
+		utils.LogError("send canned response via callback", err)
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          callback.Message.Message.Chat.ID,
+		MessageThreadID: callback.Message.Message.MessageThreadID,
+		Text:            fmt.Sprintf("✅ Sent canned response <code>/%s</code> to the user.", utils.EscapeHTML(shortcut)),
+		ParseMode:       models.ParseModeHTML,
+	})
+}
+
+func (h *AdminHandlers) sendTicketList(ctx context.Context, b *bot.Bot, chatID int64, threadID int, page int, filter string, editMessageID int) error {
+	filter = normalizeTicketFilter(filter)
+	if page < 1 {
+		page = 1
+	}
+
+	totalCount, err := h.deps.TicketService.CountTicketsByFilter(ctx, filter)
+	if err != nil {
+		return err
+	}
+
+	const pageSize = 10
+	totalPages := 1
+	if totalCount > 0 {
+		totalPages = (totalCount + pageSize - 1) / pageSize
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	offset := (page - 1) * pageSize
+	tickets, err := h.deps.TicketService.GetTicketsPage(ctx, filter, pageSize, offset)
+	if err != nil {
+		return err
+	}
+
+	text := messages.FormatAllTicketList(tickets, page, totalPages)
+	text += fmt.Sprintf("\n<i>Filter: %s</i>", filter)
+	if totalPages > 1 {
+		text += "\n<i>Use /tickets [page] [open|closed|all]</i>"
+	}
+	text = utils.SanitizeUTF8(text)
+
+	if editMessageID > 0 {
+		_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      chatID,
+			MessageID:   editMessageID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.TicketListKeyboard(tickets, page, filter, page < totalPages),
+		})
+		return err
+	}
+
+	_, err = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          chatID,
+		MessageThreadID: threadID,
+		Text:            text,
+		ParseMode:       models.ParseModeHTML,
+		ReplyMarkup:     keyboards.TicketListKeyboard(tickets, page, filter, page < totalPages),
+	})
+	return err
+}
+
+func (h *AdminHandlers) sendCannedResponseToTicket(ctx context.Context, b *bot.Bot, ticket *database.Ticket, admin *models.User, response *database.CannedResponse, originalMessageID *int64) error {
+	if ticket == nil {
+		return fmt.Errorf("ticket is required")
+	}
+	if ticket.IsClosed() {
+		return fmt.Errorf("ticket is closed")
+	}
+
+	sentMessage, err := h.deps.TicketService.SendSupportTextToUser(ctx, b, ticket, utils.EscapeHTML(response.Content))
+	if err != nil {
+		return err
+	}
+
+	ticketMessage := &database.TicketMessage{
+		TicketID:       ticket.ID,
+		SenderID:       admin.ID,
+		SenderName:     utils.GetUserNamePtr(admin),
+		SenderUsername: utils.GetUsernamePtr(admin),
+		IsAdmin:        true,
+		MessageText:    &response.Content,
+		MessageID:      func() *int64 { id := int64(sentMessage.ID); return &id }(),
+		OriginalMessageID: originalMessageID,
+	}
+
+	return h.deps.TicketService.SaveMessage(ctx, ticketMessage)
+}
+
+func parseTicketListArgs(text string) (int, string) {
+	page := 1
+	filter := "all"
+
+	fields := strings.Fields(text)
+	if len(fields) <= 1 {
+		return page, filter
+	}
+
+	for _, part := range fields[1:] {
+		if parsedPage, err := strconv.Atoi(part); err == nil && parsedPage > 0 {
+			page = parsedPage
+			continue
+		}
+		filter = normalizeTicketFilter(part)
+	}
+
+	return page, filter
+}
+
+func normalizeTicketFilter(filter string) string {
+	switch strings.ToLower(filter) {
+	case "open", "closed", "all":
+		return strings.ToLower(filter)
+	default:
+		return "all"
+	}
+}
+
+func firstField(text string) string {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func sanitizeShortcut(shortcut string) string {
+	shortcut = strings.TrimSpace(strings.TrimPrefix(shortcut, "/"))
+	shortcut = strings.SplitN(shortcut, "@", 2)[0]
+	return strings.ToLower(shortcut)
+}
+
+func isValidShortcut(shortcut string) bool {
+	if shortcut == "" {
+		return false
+	}
+	for _, r := range shortcut {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func extractCommandName(text string) string {
+	if !strings.HasPrefix(text, "/") {
+		return ""
+	}
+	return sanitizeShortcut(firstField(text))
+}
+
+func isBuiltInAdminCommand(command string) bool {
+	switch command {
+	case "help", "tickets", "close", "reopen", "priority", "info", "ban", "unban", "banned", "note", "notes", "stats", "canned", "addcanned", "delcanned":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1004,7 +1566,14 @@ func (h *AdminHandlers) getTicketFromMessage(ctx context.Context, message *model
 		return nil, fmt.Errorf("not in a thread")
 	}
 
-	return h.deps.TicketService.GetTicketByThreadID(ctx, int64(message.MessageThreadID))
+	ticket, err := h.deps.TicketService.GetTicketByThreadID(ctx, int64(message.MessageThreadID))
+	if err != nil {
+		return nil, err
+	}
+	if ticket == nil {
+		return nil, fmt.Errorf("ticket not found for thread")
+	}
+	return ticket, nil
 }
 
 // getTicketFromCommandOrThread tries to get ticket from command argument first, then falls back to thread

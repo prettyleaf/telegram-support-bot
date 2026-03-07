@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
@@ -184,9 +185,13 @@ func (h *UserHandlers) HandleNewTicket(ctx context.Context, b *bot.Bot, update *
 	ticket, err := h.deps.TicketService.CreateTicket(ctx, b, userID, userName, userUsername, "")
 	if err != nil {
 		utils.LogError("create ticket", err)
+		errorText := messages.GetTicketCreateError(lang)
+		if cooldownSeconds, ok := parseCooldownSeconds(err); ok {
+			errorText = messages.GetTicketCooldownError(cooldownSeconds, lang)
+		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    userID,
-			Text:      messages.GetTicketCreateError(lang),
+			Text:      errorText,
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -205,6 +210,8 @@ func (h *UserHandlers) HandleNewTicket(ctx context.Context, b *bot.Bot, update *
 		ParseMode: models.ParseModeHTML,
 	})
 
+	h.sendAutoTicketWelcome(ctx, b, ticket, lang)
+
 	// Send notification to the thread
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          ticket.SupportChatID,
@@ -214,7 +221,7 @@ func (h *UserHandlers) HandleNewTicket(ctx context.Context, b *bot.Bot, update *
 			"🆔 <b>ID:</b> <code>%d</code>\n"+
 			"📅 <b>Created:</b> %s\n\n"+
 			"<i>Reply to this thread to respond to the user.</i>",
-			ticket.GetDisplayName(),
+			utils.EscapeHTML(ticket.GetDisplayName()),
 			ticket.UserID,
 			ticket.CreatedAt.Format("02 Jan 2006 15:04")),
 		ParseMode:   models.ParseModeHTML,
@@ -298,6 +305,15 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 		return
 	}
 
+	if config.YAMLCfg != nil && !h.deps.State.AllowUserMessage(userID, config.YAMLCfg.RateLimit.MaxMessagesPerMinute, time.Minute) {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    userID,
+			Text:      messages.GetRateLimitError(lang),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
 	// Get user state
 	state := h.deps.State.GetUserState(userID)
 
@@ -339,9 +355,13 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 	ticket, err = h.deps.TicketService.CreateTicket(ctx, b, userID, userName, userUsername, subject)
 	if err != nil {
 		utils.LogError("auto-create ticket", err)
+		errorText := messages.GetTicketCreateError(lang)
+		if cooldownSeconds, ok := parseCooldownSeconds(err); ok {
+			errorText = messages.GetTicketCooldownError(cooldownSeconds, lang)
+		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    userID,
-			Text:      messages.GetTicketCreateError(lang),
+			Text:      errorText,
 			ParseMode: models.ParseModeHTML,
 		})
 		return
@@ -360,6 +380,8 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 		ParseMode: models.ParseModeHTML,
 	})
 
+	h.sendAutoTicketWelcome(ctx, b, ticket, lang)
+
 	// Send notification to the thread
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          ticket.SupportChatID,
@@ -369,7 +391,7 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 			"🆔 <b>ID:</b> <code>%d</code>\n"+
 			"📅 <b>Created:</b> %s\n\n"+
 			"<i>Reply to this thread to respond to the user.</i>",
-			ticket.GetDisplayName(),
+			utils.EscapeHTML(ticket.GetDisplayName()),
 			ticket.UserID,
 			ticket.CreatedAt.Format("02 Jan 2006 15:04")),
 		ParseMode:   models.ParseModeHTML,
@@ -538,6 +560,14 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 					})
 					return
 				}
+				if cooldownSeconds, ok := parseCooldownSeconds(err); ok {
+					_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+						ChatID:    userID,
+						Text:      messages.GetTicketCooldownError(cooldownSeconds, lang),
+						ParseMode: models.ParseModeHTML,
+					})
+					return
+				}
 				utils.LogError("create ticket via callback", err)
 				return
 			}
@@ -551,6 +581,8 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 				ParseMode: models.ParseModeHTML,
 			})
 
+			h.sendAutoTicketWelcome(ctx, b, ticket, lang)
+
 			// Notify in thread
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:          ticket.SupportChatID,
@@ -558,7 +590,7 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 				Text: fmt.Sprintf("🆕 <b>New Support Ticket</b>\n\n"+
 					"👤 <b>User:</b> %s\n"+
 					"🆔 <b>ID:</b> <code>%d</code>",
-					ticket.GetDisplayName(), ticket.UserID),
+					utils.EscapeHTML(ticket.GetDisplayName()), ticket.UserID),
 				ParseMode:   models.ParseModeHTML,
 				ReplyMarkup: keyboards.TicketActionsKeyboard(ticket.ID, true),
 			})
@@ -586,7 +618,7 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:    userID,
-				Text:      messages.FormatTicketDetails(ticket),
+				Text:      messages.FormatTicketDetailsForUser(ticket),
 				ParseMode: models.ParseModeHTML,
 			})
 		}
@@ -600,4 +632,44 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 			ParseMode: models.ParseModeHTML,
 		})
 	}
+}
+
+func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ticket *database.Ticket, lang string) {
+	if ticket == nil {
+		return
+	}
+
+	body := messages.GetTicketWelcomeMessageLang(ticket.TicketNumber, lang)
+	sentMsg, err := h.deps.TicketService.SendSupportTextToUser(ctx, b, ticket, body)
+	if err != nil {
+		utils.LogError("send automated ticket welcome", err)
+		return
+	}
+
+	senderName := "Support Bot"
+	messageID := int64(sentMsg.ID)
+	ticketMsg := &database.TicketMessage{
+		TicketID:    ticket.ID,
+		SenderID:    0,
+		SenderName:  &senderName,
+		IsAdmin:     true,
+		MessageText: &body,
+		MessageID:   &messageID,
+	}
+
+	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {
+		utils.LogError("save automated ticket welcome", err)
+	}
+}
+
+func parseCooldownSeconds(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+
+	var seconds int
+	if _, scanErr := fmt.Sscanf(err.Error(), "ticket creation cooldown active for %d seconds", &seconds); scanErr != nil {
+		return 0, false
+	}
+	return seconds, true
 }

@@ -11,7 +11,10 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **User Ban System**: Ban abusive users from creating tickets
 - **Internal Notes**: Add private notes visible only to admins
 - **Media Support**: Forward photos, documents, videos, voice messages, and more
-- **Canned Responses**: Create predefined responses for common questions (coming soon)
+- **Canned Responses**: Create and send predefined responses for common questions
+- **Language Selection**: English and Russian user flows
+- **Ticket Stats**: View ticket activity summaries from admin commands
+- **Automatic Ticket Welcome**: Send a configurable first support reply on new tickets
 
 ## Commands
 
@@ -23,6 +26,7 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 | `/newticket` | Create a new support ticket |
 | `/mytickets` | View your tickets |
 | `/cancel` | Cancel current operation |
+| `/language` | Change your language |
 
 ### Admin Commands
 
@@ -39,6 +43,11 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 | `/banned` | List all banned users |
 | `/note [text]` | Add internal note (admin-only) |
 | `/notes` | View ticket notes |
+| `/stats [days]` | View ticket statistics |
+| `/canned` | List canned responses |
+| `/addcanned [shortcut] [title] \| [content]` | Add a canned response |
+| `/delcanned [shortcut]` | Delete a canned response |
+| `/[shortcut]` | Send a canned response inside a ticket thread |
 
 ## Configuration (config.yaml)
 
@@ -59,6 +68,14 @@ messages:
     Send me a message to create a ticket.
   ticket_created: |
     ✅ Ticket #{ticket_number} created!
+  ticket_welcome: |
+    👋 <b>Hello!</b>
+    Your ticket #{ticket_number} is now open.
+    You can send any extra details in this chat at any time.
+  ticket_welcome_ru: |
+    👋 <b>Здравствуйте!</b>
+    Ваш тикет #{ticket_number} открыт.
+    Вы можете отправить дополнительные детали в этом чате в любое время.
   ticket_closed: |
     🔒 Ticket #{ticket_number} has been closed.
 ```

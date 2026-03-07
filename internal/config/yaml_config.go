@@ -32,6 +32,8 @@ type TicketsConfig struct {
 type MessagesConfig struct {
 	Welcome        string `yaml:"welcome"`
 	TicketCreated  string `yaml:"ticket_created"`
+	TicketWelcome  string `yaml:"ticket_welcome"`
+	TicketWelcomeRu string `yaml:"ticket_welcome_ru"`
 	TicketClosed   string `yaml:"ticket_closed"`
 	TicketReopened string `yaml:"ticket_reopened"`
 	UserBanned     string `yaml:"user_banned"`
@@ -53,6 +55,15 @@ type RateLimitConfig struct {
 type ThreadConfig struct {
 	NameFormat string `yaml:"name_format"`
 	IconColor  int    `yaml:"icon_color"`
+}
+
+var forumTopicIconColors = []int{
+	7322096,
+	16766590,
+	13338331,
+	9367192,
+	16749490,
+	16478047,
 }
 
 // LoadYAMLConfig loads configuration from a YAML file
@@ -89,6 +100,25 @@ func LoadYAMLConfig(path string) (*YAMLConfig, error) {
 	if cfg.Thread.NameFormat == "" {
 		cfg.Thread.NameFormat = "#{ticket_number} - {user_name}"
 	}
+	cfg.Thread.IconColor = normalizeThreadIconColor(cfg.Thread.IconColor)
 
 	return &cfg, nil
+}
+
+func normalizeThreadIconColor(value int) int {
+	if value == 0 {
+		return forumTopicIconColors[0]
+	}
+
+	if value >= 1 && value <= len(forumTopicIconColors) {
+		return forumTopicIconColors[value-1]
+	}
+
+	for _, allowed := range forumTopicIconColors {
+		if value == allowed {
+			return value
+		}
+	}
+
+	return forumTopicIconColors[0]
 }

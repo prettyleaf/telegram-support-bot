@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
 	"remnafamily/internal/handlers"
+	"remnafamily/internal/messages"
 	"remnafamily/internal/services"
 	"remnafamily/internal/state"
 	"remnafamily/internal/types"
@@ -20,14 +22,14 @@ import (
 
 // App represents the main application with all its dependencies.
 type App struct {
-	Config       *config.Config
-	Bot          *bot.Bot
-	DB           *database.Repository
-	State        *state.AppState
-	deps         *types.Dependencies
-	ctx          context.Context
-	cancelFunc   context.CancelFunc
-	userHandlers *handlers.UserHandlers
+	Config        *config.Config
+	Bot           *bot.Bot
+	DB            *database.Repository
+	State         *state.AppState
+	deps          *types.Dependencies
+	ctx           context.Context
+	cancelFunc    context.CancelFunc
+	userHandlers  *handlers.UserHandlers
 	adminHandlers *handlers.AdminHandlers
 }
 
@@ -150,6 +152,10 @@ func (a *App) registerHandlers() {
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/banned", bot.MatchTypePrefix, a.adminHandlers.HandleBanned)
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/note", bot.MatchTypePrefix, a.adminHandlers.HandleNote)
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/notes", bot.MatchTypePrefix, a.adminHandlers.HandleNotes)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/stats", bot.MatchTypePrefix, a.adminHandlers.HandleStats)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/canned", bot.MatchTypePrefix, a.adminHandlers.HandleCanned)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/addcanned", bot.MatchTypePrefix, a.adminHandlers.HandleAddCanned)
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/delcanned", bot.MatchTypePrefix, a.adminHandlers.HandleDelCanned)
 
 	// Callback queries
 	a.Bot.RegisterHandler(bot.HandlerTypeCallbackQueryData, "", bot.MatchTypePrefix, a.handleCallback)
@@ -182,14 +188,11 @@ func (a *App) handleCallback(ctx context.Context, b *bot.Bot, update *models.Upd
 
 	// Admin callbacks
 	if config.IsAdmin(userID) {
-		// Check if this is an admin-specific callback
-		if strings.HasPrefix(data, "ticket:close") ||
-			strings.HasPrefix(data, "ticket:reopen") ||
-			strings.HasPrefix(data, "ticket:info") ||
-			strings.HasPrefix(data, "ticket:confirmclose") ||
+		if (strings.HasPrefix(data, "ticket:") && data != "ticket:create") ||
 			strings.HasPrefix(data, "priority:") ||
 			strings.HasPrefix(data, "tickets:") ||
-			strings.HasPrefix(data, "banned:") {
+			strings.HasPrefix(data, "banned:") ||
+			strings.HasPrefix(data, "canned:") {
 			a.adminHandlers.HandleAdminCallback(ctx, b, update)
 			return
 		}
@@ -207,8 +210,10 @@ func (a *App) handleMessage(ctx context.Context, b *bot.Bot, update *models.Upda
 
 	message := update.Message
 
-	// Skip commands
 	if message.Text != "" && strings.HasPrefix(message.Text, "/") {
+		if message.Chat.ID == config.Cfg.SupportChatID && config.IsAdmin(message.From.ID) {
+			a.adminHandlers.HandleAdminDynamicCommand(ctx, b, update)
+		}
 		return
 	}
 
@@ -242,6 +247,10 @@ func (a *App) Start() error {
 	// Start bot in background
 	go a.Bot.Start(a.ctx)
 
+	if config.YAMLCfg != nil && config.YAMLCfg.Tickets.AutoCloseHours > 0 {
+		go a.startAutoCloseLoop()
+	}
+
 	return nil
 }
 
@@ -257,4 +266,70 @@ func (a *App) Stop() error {
 
 	utils.LogSystem("Shutdown complete")
 	return nil
+}
+
+func (a *App) startAutoCloseLoop() {
+	a.runAutoClosePass()
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			a.runAutoClosePass()
+		}
+	}
+}
+
+func (a *App) runAutoClosePass() {
+	if config.YAMLCfg == nil || config.YAMLCfg.Tickets.AutoCloseHours <= 0 {
+		return
+	}
+
+	cutoff := time.Now().Add(-time.Duration(config.YAMLCfg.Tickets.AutoCloseHours) * time.Hour)
+	tickets, err := a.deps.TicketService.GetInactiveOpenTickets(a.ctx, cutoff)
+	if err != nil {
+		utils.LogError("load inactive tickets for auto-close", err)
+		return
+	}
+	if len(tickets) == 0 {
+		return
+	}
+
+	for _, ticket := range tickets {
+		if ticket == nil {
+			continue
+		}
+
+		if err := a.deps.TicketService.CloseTicket(a.ctx, a.Bot, ticket.ID, 0, "Auto Close"); err != nil {
+			utils.LogError("auto-close ticket", err)
+			continue
+		}
+
+		utils.LogTicket("Ticket #%s auto-closed after inactivity", ticket.TicketNumber)
+		a.State.ClearUserState(ticket.UserID)
+
+		lang, err := a.DB.GetUserLanguage(a.ctx, ticket.UserID)
+		if err != nil {
+			lang = "en"
+		}
+
+		_, _ = a.Bot.SendMessage(a.ctx, &bot.SendMessageParams{
+			ChatID:    ticket.UserID,
+			Text:      messages.GetTicketClosedMessageLang(ticket.TicketNumber, lang),
+			ParseMode: models.ParseModeHTML,
+		})
+
+		if ticket.ThreadID > 1 {
+			_, _ = a.Bot.SendMessage(a.ctx, &bot.SendMessageParams{
+				ChatID:          ticket.SupportChatID,
+				MessageThreadID: int(ticket.ThreadID),
+				Text:            "🔒 <b>Ticket auto-closed due to inactivity.</b>",
+				ParseMode:       models.ParseModeHTML,
+			})
+		}
+	}
 }

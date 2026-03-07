@@ -114,8 +114,8 @@ func PriorityKeyboard(ticketID int) *models.InlineKeyboardMarkup {
 	}
 }
 
-// TicketListKeyboard creates the keyboard for ticket list (admin)
-func TicketListKeyboard(tickets []*database.Ticket, page int) *models.InlineKeyboardMarkup {
+// TicketListKeyboard creates the keyboard for a paginated ticket list.
+func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, hasNextPage bool) *models.InlineKeyboardMarkup {
 	var buttons [][]models.InlineKeyboardButton
 
 	for _, t := range tickets {
@@ -136,17 +136,17 @@ func TicketListKeyboard(tickets []*database.Ticket, page int) *models.InlineKeyb
 
 	// Pagination
 	var navButtons []models.InlineKeyboardButton
-	if page > 0 {
+	if page > 1 {
 		navButtons = append(navButtons, models.InlineKeyboardButton{
-			Text: "⬅️ Previous", CallbackData: fmt.Sprintf("tickets:page:%d", page-1),
+			Text: "⬅️ Previous", CallbackData: fmt.Sprintf("tickets:page:%d:%s", page-1, filter),
 		})
 	}
 	navButtons = append(navButtons, models.InlineKeyboardButton{
-		Text: "🔄 Refresh", CallbackData: "tickets:refresh",
+		Text: "🔄 Refresh", CallbackData: fmt.Sprintf("tickets:refresh:%s:%d", filter, page),
 	})
-	if len(tickets) == 10 { // Assume more pages if we got a full page
+	if hasNextPage {
 		navButtons = append(navButtons, models.InlineKeyboardButton{
-			Text: "➡️ Next", CallbackData: fmt.Sprintf("tickets:page:%d", page+1),
+			Text: "➡️ Next", CallbackData: fmt.Sprintf("tickets:page:%d:%s", page+1, filter),
 		})
 	}
 	
@@ -198,7 +198,7 @@ func ConfirmCloseKeyboard(ticketID int) *models.InlineKeyboardMarkup {
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
 				{Text: "✅ Yes, Close", CallbackData: fmt.Sprintf("ticket:confirmclose:%d", ticketID)},
-				{Text: "❌ Cancel", CallbackData: "ticket:cancelclose"},
+				{Text: "❌ Cancel", CallbackData: fmt.Sprintf("ticket:cancelclose:%d", ticketID)},
 			},
 		},
 	}
@@ -223,6 +223,17 @@ func BannedUsersKeyboard(users []*database.BannedUser) *models.InlineKeyboardMar
 
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
+	}
+}
+
+// BannedUserActionsKeyboard creates actions for a specific banned user.
+func BannedUserActionsKeyboard(userID int64) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "✅ Unban User", CallbackData: fmt.Sprintf("banned:unban:%d", userID)},
+			},
+		},
 	}
 }
 

@@ -55,13 +55,26 @@ func Load() error {
 		fmt.Println("Warning: .env file not found, using environment variables")
 	}
 
-	Cfg = &Config{
-		BotToken:         getRequiredEnv("BOT_TOKEN"),
-		PostgresUser:     getRequiredEnv("POSTGRES_USER"),
-		PostgresPassword: getRequiredEnv("POSTGRES_PASSWORD"),
-		PostgresDB:       getRequiredEnv("POSTGRES_DB"),
-		PostgresHost:     getRequiredEnv("POSTGRES_HOST"),
-		PostgresPort:     getRequiredEnv("POSTGRES_PORT"),
+	Cfg = &Config{}
+
+	var err error
+	if Cfg.BotToken, err = getRequiredEnv("BOT_TOKEN"); err != nil {
+		return err
+	}
+	if Cfg.PostgresUser, err = getRequiredEnv("POSTGRES_USER"); err != nil {
+		return err
+	}
+	if Cfg.PostgresPassword, err = getRequiredEnv("POSTGRES_PASSWORD"); err != nil {
+		return err
+	}
+	if Cfg.PostgresDB, err = getRequiredEnv("POSTGRES_DB"); err != nil {
+		return err
+	}
+	if Cfg.PostgresHost, err = getRequiredEnv("POSTGRES_HOST"); err != nil {
+		return err
+	}
+	if Cfg.PostgresPort, err = getRequiredEnv("POSTGRES_PORT"); err != nil {
+		return err
 	}
 
 	// Parse SUPPORT_CHAT_ID
@@ -101,12 +114,12 @@ func Load() error {
 	return nil
 }
 
-func getRequiredEnv(key string) string {
+func getRequiredEnv(key string) (string, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		panic(fmt.Sprintf("Required environment variable %s is not set", key))
+		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
-	return value
+	return value, nil
 }
 
 // IsAdmin checks if a user ID is in the admin list

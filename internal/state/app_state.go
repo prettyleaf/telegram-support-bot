@@ -17,6 +17,7 @@ type AppState struct {
 	mu         sync.RWMutex
 	userStates map[int64]*UserState
 	adminIDs   map[int64]bool
+	messageLog map[int64][]time.Time
 }
 
 // NewAppState creates a new application state
@@ -24,6 +25,7 @@ func NewAppState() *AppState {
 	return &AppState{
 		userStates: make(map[int64]*UserState),
 		adminIDs:   make(map[int64]bool),
+		messageLog: make(map[int64][]time.Time),
 	}
 }
 
@@ -119,4 +121,33 @@ func (s *AppState) GetAllAdminIDs() []int64 {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// AllowUserMessage records a user message and enforces a rolling window limit.
+func (s *AppState) AllowUserMessage(userID int64, maxMessages int, window time.Duration) bool {
+	if maxMessages <= 0 {
+		return true
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-window)
+	entries := s.messageLog[userID]
+	filtered := entries[:0]
+	for _, ts := range entries {
+		if ts.After(cutoff) {
+			filtered = append(filtered, ts)
+		}
+	}
+
+	if len(filtered) >= maxMessages {
+		s.messageLog[userID] = filtered
+		return false
+	}
+
+	filtered = append(filtered, now)
+	s.messageLog[userID] = filtered
+	return true
 }

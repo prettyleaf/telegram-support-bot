@@ -23,8 +23,23 @@ tickets:
   # Default priority: low, normal, high, urgent
   default_priority: normal
 
-# Messages settings
-# DEPRECATED. See /internal/messages/messages.go
+# Message overrides (optional)
+messages:
+  # Automated support reply sent immediately after a new ticket is opened
+  ticket_welcome: |
+    👋 <b>Hello!</b>
+
+    Your ticket #{ticket_number} is now open. Our support team will review it shortly.
+
+    You can send any extra details in this chat at any time.
+
+  # Optional Russian override for the automated support reply
+  ticket_welcome_ru: |
+    👋 <b>Здравствуйте!</b>
+
+    Ваш тикет #{ticket_number} открыт. Наша команда поддержки скоро его посмотрит.
+
+    Вы можете отправить дополнительные детали в этом чате в любое время.
 
 # Database settings
 database:

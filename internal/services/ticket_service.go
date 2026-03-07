@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
+	"remnafamily/internal/utils"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -40,6 +42,25 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 	}
 	if openCount >= config.YAMLCfg.Tickets.MaxOpenPerUser {
 		return nil, fmt.Errorf("maximum open tickets limit reached (%d)", config.YAMLCfg.Tickets.MaxOpenPerUser)
+	}
+
+	// Check ticket creation cooldown
+	cooldownSeconds := config.YAMLCfg.RateLimit.TicketCreationCooldown
+	if cooldownSeconds > 0 {
+		latestTicket, err := s.db.GetLatestTicketByUserID(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("get latest ticket: %w", err)
+		}
+		if latestTicket != nil {
+			nextAllowedAt := latestTicket.CreatedAt.Add(time.Duration(cooldownSeconds) * time.Second)
+			if time.Now().Before(nextAllowedAt) {
+				retryAfter := int(time.Until(nextAllowedAt).Seconds())
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				return nil, fmt.Errorf("ticket creation cooldown active for %d seconds", retryAfter)
+			}
+		}
 	}
 
 	// Generate ticket number
@@ -193,6 +214,21 @@ func (s *TicketService) GetAllOpenTickets(ctx context.Context) ([]*database.Tick
 	return s.db.GetAllOpenTickets(ctx)
 }
 
+// GetInactiveOpenTickets gets inactive open tickets older than the cutoff.
+func (s *TicketService) GetInactiveOpenTickets(ctx context.Context, cutoff time.Time) ([]*database.Ticket, error) {
+	return s.db.GetInactiveOpenTickets(ctx, cutoff)
+}
+
+// GetTicketsPage gets tickets by filter with pagination.
+func (s *TicketService) GetTicketsPage(ctx context.Context, filter string, limit, offset int) ([]*database.Ticket, error) {
+	return s.db.GetTicketsPage(ctx, filter, limit, offset)
+}
+
+// CountTicketsByFilter counts tickets for the requested filter.
+func (s *TicketService) CountTicketsByFilter(ctx context.Context, filter string) (int, error) {
+	return s.db.CountTicketsByFilter(ctx, filter)
+}
+
 // GetClosedTickets gets closed tickets with pagination
 func (s *TicketService) GetClosedTickets(ctx context.Context, limit, offset int) ([]*database.Ticket, error) {
 	return s.db.GetClosedTickets(ctx, limit, offset)
@@ -290,7 +326,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 
 	// Build message text with user info header
 	displayName := ticket.GetDisplayName()
-	header := fmt.Sprintf("📩 <b>From:</b> %s (ID: <code>%d</code>)\n\n", displayName, ticket.UserID)
+	header := fmt.Sprintf("📩 <b>From:</b> %s (ID: <code>%d</code>)\n\n", utils.EscapeHTML(displayName), ticket.UserID)
 
 	var sentMsg *models.Message
 	var err error
@@ -300,7 +336,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
-			Text:            header + message.Text,
+			Text:            header + utils.EscapeHTML(message.Text),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Photo != nil && len(message.Photo) > 0 {
@@ -308,7 +344,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 		photo := message.Photo[len(message.Photo)-1]
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
 			ChatID:          ticket.SupportChatID,
@@ -320,7 +356,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 	} else if message.Document != nil {
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendDocument(ctx, &bot.SendDocumentParams{
 			ChatID:          ticket.SupportChatID,
@@ -332,7 +368,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 	} else if message.Video != nil {
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendVideo(ctx, &bot.SendVideoParams{
 			ChatID:          ticket.SupportChatID,
@@ -424,14 +460,14 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	if message.Text != "" {
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    ticket.UserID,
-			Text:      header + message.Text,
+			Text:      header + utils.EscapeHTML(message.Text),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Photo != nil && len(message.Photo) > 0 {
 		photo := message.Photo[len(message.Photo)-1]
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
 			ChatID:    ticket.UserID,
@@ -442,7 +478,7 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	} else if message.Document != nil {
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendDocument(ctx, &bot.SendDocumentParams{
 			ChatID:    ticket.UserID,
@@ -453,7 +489,7 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	} else if message.Video != nil {
 		caption := header
 		if message.Caption != "" {
-			caption += message.Caption
+			caption += utils.EscapeHTML(message.Caption)
 		}
 		sentMsg, err = b.SendVideo(ctx, &bot.SendVideoParams{
 			ChatID:    ticket.UserID,
@@ -510,6 +546,16 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	return sentMsg, err
 }
 
+// SendSupportTextToUser sends an HTML-formatted support reply body to the user.
+func (s *TicketService) SendSupportTextToUser(ctx context.Context, b *bot.Bot, ticket *database.Ticket, htmlBody string) (*models.Message, error) {
+	text := fmt.Sprintf("💬 <b>Support Reply</b> (Ticket #%s)\n\n%s", ticket.TicketNumber, htmlBody)
+	return b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    ticket.UserID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
 // BanUser bans a user from creating tickets
 func (s *TicketService) BanUser(ctx context.Context, userID int64, userName, userUsername *string, bannedBy int64, bannedByName, reason string) error {
 	ban := &database.BannedUser{
@@ -541,6 +587,22 @@ func (s *TicketService) GetCannedResponse(ctx context.Context, shortcut string) 
 // GetAllCannedResponses gets all canned responses
 func (s *TicketService) GetAllCannedResponses(ctx context.Context) ([]*database.CannedResponse, error) {
 	return s.db.GetAllCannedResponses(ctx)
+}
+
+// CreateCannedResponse stores a canned response.
+func (s *TicketService) CreateCannedResponse(ctx context.Context, shortcut, title, content string, createdBy int64) error {
+	resp := &database.CannedResponse{
+		Shortcut:  shortcut,
+		Title:     title,
+		Content:   content,
+		CreatedBy: createdBy,
+	}
+	return s.db.CreateCannedResponse(ctx, resp)
+}
+
+// DeleteCannedResponse removes a canned response by shortcut.
+func (s *TicketService) DeleteCannedResponse(ctx context.Context, shortcut string) error {
+	return s.db.DeleteCannedResponse(ctx, shortcut)
 }
 
 // AddNote adds an internal note to a ticket
@@ -577,4 +639,14 @@ func (s *TicketService) GetTicketByNumber(ctx context.Context, ticketNumber stri
 // GetAllBannedUsers gets all banned users
 func (s *TicketService) GetAllBannedUsers(ctx context.Context) ([]*database.BannedUser, error) {
 	return s.db.GetAllBannedUsers(ctx)
+}
+
+// GetBannedUser gets ban details for a specific user.
+func (s *TicketService) GetBannedUser(ctx context.Context, userID int64) (*database.BannedUser, error) {
+	return s.db.GetBannedUser(ctx, userID)
+}
+
+// GetTicketStats gets aggregate ticket stats for the provided time range.
+func (s *TicketService) GetTicketStats(ctx context.Context, startDate, endDate time.Time) (*database.TicketStats, error) {
+	return s.db.GetTicketStats(ctx, startDate, endDate)
 }

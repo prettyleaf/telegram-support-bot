@@ -2,11 +2,15 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/utils"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Repository handles all database operations
@@ -64,7 +68,13 @@ func (r *Repository) GetTicketByThreadID(ctx context.Context, threadID int64) (*
 
 // GetOpenTicketByUserID retrieves the most recent open ticket for a user
 func (r *Repository) GetOpenTicketByUserID(ctx context.Context, userID int64) (*Ticket, error) {
-	query := `SELECT * FROM tickets WHERE user_id = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1`
+	query := `SELECT * FROM tickets WHERE user_id = $1 AND status IN ('open', 'pending') ORDER BY created_at DESC LIMIT 1`
+	return r.scanTicket(ctx, query, userID)
+}
+
+// GetLatestTicketByUserID retrieves the most recent ticket for a user regardless of status.
+func (r *Repository) GetLatestTicketByUserID(ctx context.Context, userID int64) (*Ticket, error) {
+	query := `SELECT * FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`
 	return r.scanTicket(ctx, query, userID)
 }
 
@@ -86,6 +96,55 @@ func (r *Repository) GetOpenTicketsCountByUserID(ctx context.Context, userID int
 func (r *Repository) GetAllOpenTickets(ctx context.Context) ([]*Ticket, error) {
 	query := `SELECT * FROM tickets WHERE status IN ('open', 'pending') ORDER BY created_at ASC`
 	return r.scanTickets(ctx, query)
+}
+
+// GetInactiveOpenTickets retrieves open tickets whose last activity is older than the cutoff.
+func (r *Repository) GetInactiveOpenTickets(ctx context.Context, cutoff time.Time) ([]*Ticket, error) {
+	query := `
+		SELECT t.*
+		FROM tickets t
+		LEFT JOIN (
+			SELECT ticket_id, MAX(created_at) AS last_message_at
+			FROM ticket_messages
+			GROUP BY ticket_id
+		) tm ON tm.ticket_id = t.id
+		WHERE t.status IN ('open', 'pending')
+			AND COALESCE(tm.last_message_at, t.created_at) < $1
+		ORDER BY COALESCE(tm.last_message_at, t.created_at) ASC
+	`
+	return r.scanTickets(ctx, query, cutoff)
+}
+
+// GetTicketsPage retrieves a paginated ticket list by filter.
+func (r *Repository) GetTicketsPage(ctx context.Context, filter string, limit, offset int) ([]*Ticket, error) {
+	switch strings.ToLower(filter) {
+	case "open":
+		query := `SELECT * FROM tickets WHERE status IN ('open', 'pending') ORDER BY created_at ASC LIMIT $1 OFFSET $2`
+		return r.scanTickets(ctx, query, limit, offset)
+	case "closed":
+		query := `SELECT * FROM tickets WHERE status IN ('closed', 'resolved') ORDER BY COALESCE(closed_at, created_at) DESC LIMIT $1 OFFSET $2`
+		return r.scanTickets(ctx, query, limit, offset)
+	default:
+		query := `SELECT * FROM tickets ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		return r.scanTickets(ctx, query, limit, offset)
+	}
+}
+
+// CountTicketsByFilter counts tickets for the requested filter.
+func (r *Repository) CountTicketsByFilter(ctx context.Context, filter string) (int, error) {
+	var query string
+	switch strings.ToLower(filter) {
+	case "open":
+		query = `SELECT COUNT(*) FROM tickets WHERE status IN ('open', 'pending')`
+	case "closed":
+		query = `SELECT COUNT(*) FROM tickets WHERE status IN ('closed', 'resolved')`
+	default:
+		query = `SELECT COUNT(*) FROM tickets`
+	}
+
+	var count int
+	err := pool.QueryRow(ctx, query).Scan(&count)
+	return count, err
 }
 
 // GetClosedTickets retrieves closed tickets with pagination
@@ -151,7 +210,17 @@ func (r *Repository) GetNextTicketNumber(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%d", maxID), nil
+
+	number := fmt.Sprintf("%d", maxID)
+	prefix := ""
+	if config.YAMLCfg != nil {
+		prefix = strings.TrimSpace(config.YAMLCfg.Tickets.NumberPrefix)
+	}
+	if prefix == "" {
+		return number, nil
+	}
+
+	return fmt.Sprintf("%s-%s", prefix, number), nil
 }
 
 // Ticket Message Operations
@@ -450,6 +519,9 @@ func (r *Repository) scanTicket(ctx context.Context, query string, args ...inter
 		&t.CreatedAt, &t.UpdatedAt, &t.ClosedAt, &t.ClosedBy, &t.ClosedByName,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &t, nil

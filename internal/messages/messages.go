@@ -6,6 +6,7 @@ import (
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
+	"remnafamily/internal/utils"
 )
 
 // Language selection message
@@ -64,12 +65,43 @@ func GetTicketCreatedMessageLang(ticketNumber string, lang string) string {
 Наша команда поддержки уведомлена и скоро ответит.
 Все ваши сообщения будут переданы команде поддержки.`
 	} else {
-		msg = config.YAMLCfg.Messages.TicketCreated
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketCreated
+		}
 		if msg == "" {
 			msg = `✅ <b>Ticket #{ticket_number} created!</b>
 
 Our support team has been notified and will respond shortly.
 All your messages will be forwarded to the support team.`
+		}
+	}
+	return strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
+}
+
+// GetTicketWelcomeMessageLang returns the automated support welcome message in specified language.
+func GetTicketWelcomeMessageLang(ticketNumber string, lang string) string {
+	var msg string
+	if lang == database.LangRussian {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketWelcomeRu
+		}
+		if msg == "" {
+			msg = `👋 <b>Здравствуйте!</b>
+
+Ваш тикет #{ticket_number} открыт. Наша команда поддержки скоро его посмотрит.
+
+Если хотите, можете отправить дополнительные детали в этом чате.`
+		}
+	} else {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketWelcome
+		}
+		if msg == "" {
+			msg = `👋 <b>Hello!</b>
+
+Your ticket #{ticket_number} is now open. Our support team will review it shortly.
+
+You can send any extra details in this chat at any time.`
 		}
 	}
 	return strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
@@ -88,7 +120,9 @@ func GetTicketClosedMessageLang(ticketNumber string, lang string) string {
 
 Если вам нужна дополнительная помощь, вы можете создать новый тикет с помощью /newticket`
 	} else {
-		msg = config.YAMLCfg.Messages.TicketClosed
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketClosed
+		}
 		if msg == "" {
 			msg = `🔒 <b>Ticket #{ticket_number} has been closed.</b>
 
@@ -100,7 +134,10 @@ If you need further assistance, you can create a new ticket with /newticket`
 
 // Ticket reopened message
 func GetTicketReopenedMessage(ticketNumber string) string {
-	msg := config.YAMLCfg.Messages.TicketReopened
+	msg := ""
+	if config.YAMLCfg != nil {
+		msg = config.YAMLCfg.Messages.TicketReopened
+	}
 	if msg == "" {
 		msg = `🔓 <b>Ticket #{ticket_number} has been reopened.</b>
 
@@ -154,7 +191,7 @@ func FormatUserTicketListLang(tickets []*database.Ticket, lang string) string {
 		statusEmoji := getStatusEmoji(t.Status)
 		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", statusEmoji, t.TicketNumber, t.Status))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(*t.Subject, 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -173,9 +210,9 @@ func FormatAdminTicketList(tickets []*database.Ticket) string {
 
 	for _, t := range tickets {
 		priorityEmoji := getPriorityEmoji(t.Priority)
-		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", priorityEmoji, t.TicketNumber, t.GetDisplayName()))
+		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", priorityEmoji, t.TicketNumber, utils.EscapeHTML(t.GetDisplayName())))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(*t.Subject, 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -194,14 +231,14 @@ func FormatAllTicketList(tickets []*database.Ticket, page, totalPages int) strin
 
 	for _, t := range tickets {
 		statusEmoji := getStatusEmoji(t.Status)
-		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", statusEmoji, t.TicketNumber, t.GetDisplayName()))
+		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", statusEmoji, t.TicketNumber, utils.EscapeHTML(t.GetDisplayName())))
 		sb.WriteString(fmt.Sprintf("   📊 %s", t.Status))
 		if t.ClosedAt != nil && t.ClosedByName != nil {
-			sb.WriteString(fmt.Sprintf(" (closed by %s)", *t.ClosedByName))
+			sb.WriteString(fmt.Sprintf(" (closed by %s)", utils.EscapeHTML(*t.ClosedByName)))
 		}
 		sb.WriteString("\n")
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(*t.Subject, 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -209,25 +246,34 @@ func FormatAllTicketList(tickets []*database.Ticket, page, totalPages int) strin
 	return sb.String()
 }
 
-// Format ticket details
-func FormatTicketDetails(t *database.Ticket) string {
+// FormatTicketDetailsForAdmin formats ticket details for admins.
+func FormatTicketDetailsForAdmin(t *database.Ticket) string {
+	return formatTicketDetails(t, true)
+}
+
+// FormatTicketDetailsForUser formats ticket details for users.
+func FormatTicketDetailsForUser(t *database.Ticket) string {
+	return formatTicketDetails(t, false)
+}
+
+func formatTicketDetails(t *database.Ticket, includeCloser bool) string {
 	var sb strings.Builder
-	
+
 	sb.WriteString(fmt.Sprintf("🎫 <b>Ticket #%s</b>\n\n", t.TicketNumber))
 	sb.WriteString(fmt.Sprintf("%s <b>Status:</b> %s\n", getStatusEmoji(t.Status), strings.Title(t.Status)))
 	sb.WriteString(fmt.Sprintf("%s <b>Priority:</b> %s\n", getPriorityEmoji(t.Priority), strings.Title(t.Priority)))
-	sb.WriteString(fmt.Sprintf("👤 <b>User:</b> %s (ID: <code>%d</code>)\n", t.GetDisplayName(), t.UserID))
-	
+	sb.WriteString(fmt.Sprintf("👤 <b>User:</b> %s (ID: <code>%d</code>)\n", utils.EscapeHTML(t.GetDisplayName()), t.UserID))
+
 	if t.Subject != nil && *t.Subject != "" {
-		sb.WriteString(fmt.Sprintf("📝 <b>Subject:</b> %s\n", *t.Subject))
+		sb.WriteString(fmt.Sprintf("📝 <b>Subject:</b> %s\n", utils.EscapeHTML(*t.Subject)))
 	}
-	
+
 	sb.WriteString(fmt.Sprintf("📅 <b>Created:</b> %s\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
-	
+
 	if t.ClosedAt != nil {
 		sb.WriteString(fmt.Sprintf("🔒 <b>Closed:</b> %s", t.ClosedAt.Format("02 Jan 2006 15:04")))
-		if t.ClosedByName != nil {
-			sb.WriteString(fmt.Sprintf(" by %s", *t.ClosedByName))
+		if includeCloser && t.ClosedByName != nil {
+			sb.WriteString(fmt.Sprintf(" by %s", utils.EscapeHTML(*t.ClosedByName)))
 		}
 		sb.WriteString("\n")
 	}
@@ -254,10 +300,7 @@ func GetAdminHelpMessage() string {
 /banned - List banned users
 
 <b>Utilities:</b>
-/note [text] - Add internal note to ticket
-/notes - View ticket notes
-/info - View ticket details
-/stats - View ticket statistics
+/stats [days] - View ticket statistics
 
 <b>Canned Responses:</b>
 /canned - List canned responses
@@ -298,6 +341,22 @@ func GetMaxTicketsError(count int, lang string) string {
 		return fmt.Sprintf("⚠️ У вас уже есть %d открытых тикетов. Пожалуйста, дождитесь их решения перед созданием нового.", count)
 	}
 	return fmt.Sprintf("⚠️ You already have %d open ticket(s). Please wait for them to be resolved before creating a new one.", count)
+}
+
+// GetTicketCooldownError returns ticket creation cooldown message in specified language.
+func GetTicketCooldownError(seconds int, lang string) string {
+	if lang == database.LangRussian {
+		return fmt.Sprintf("⏳ Пожалуйста, подождите ещё %d сек. перед созданием нового тикета.", seconds)
+	}
+	return fmt.Sprintf("⏳ Please wait %d more second(s) before creating a new ticket.", seconds)
+}
+
+// GetRateLimitError returns message rate limit error in specified language.
+func GetRateLimitError(lang string) string {
+	if lang == database.LangRussian {
+		return "⏳ Слишком много сообщений. Пожалуйста, подождите немного и попробуйте снова."
+	}
+	return "⏳ Too many messages too quickly. Please wait a moment and try again."
 }
 
 // GetOperationCancelled returns operation cancelled message in specified language
