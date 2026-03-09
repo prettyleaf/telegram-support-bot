@@ -58,6 +58,7 @@ func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMark
 
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: "📊 View Details", CallbackData: fmt.Sprintf("ticket:info:%d", ticketID)},
+		{Text: "📤 Export", CallbackData: fmt.Sprintf("ticket:export:%d", ticketID)},
 	})
 
 	return &models.InlineKeyboardMarkup{
@@ -84,6 +85,10 @@ func TicketViewKeyboard(ticketID int, isOpen bool, threadID int64) *models.Inlin
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: "🎯 Set Priority", CallbackData: fmt.Sprintf("ticket:priority:%d", ticketID)},
 		{Text: "📝 Notes", CallbackData: fmt.Sprintf("ticket:notes:%d", ticketID)},
+	})
+
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "📤 Export", CallbackData: fmt.Sprintf("ticket:export:%d", ticketID)},
 	})
 
 	// Third row: Link to topic if thread exists
@@ -123,12 +128,12 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 		if t.Status == "closed" {
 			statusEmoji = "🔴"
 		}
-		
+
 		text := fmt.Sprintf("%s #%s - %s", statusEmoji, t.TicketNumber, t.GetDisplayName())
 		if len(text) > 40 {
 			text = text[:37] + "..."
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("ticket:view:%d", t.ID)},
 		})
@@ -149,7 +154,7 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 			Text: "➡️ Next", CallbackData: fmt.Sprintf("tickets:page:%d:%s", page+1, filter),
 		})
 	}
-	
+
 	if len(navButtons) > 0 {
 		buttons = append(buttons, navButtons)
 	}
@@ -168,7 +173,7 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 		if t.Status == "closed" {
 			statusEmoji = "🔴"
 		}
-		
+
 		text := fmt.Sprintf("%s #%s", statusEmoji, t.TicketNumber)
 		if t.Subject != nil && *t.Subject != "" {
 			subject := *t.Subject
@@ -177,7 +182,7 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 			}
 			text += " - " + subject
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("myticket:view:%d", t.ID)},
 		})
@@ -215,7 +220,7 @@ func BannedUsersKeyboard(users []*database.BannedUser) *models.InlineKeyboardMar
 		} else if u.UserName != nil && *u.UserName != "" {
 			displayName = *u.UserName
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: fmt.Sprintf("🚫 %s", displayName), CallbackData: fmt.Sprintf("banned:view:%d", u.UserID)},
 		})
@@ -246,7 +251,7 @@ func CannedResponsesKeyboard(responses []*database.CannedResponse) *models.Inlin
 		if len(text) > 40 {
 			text = text[:37] + "..."
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("canned:use:%s", r.Shortcut)},
 		})

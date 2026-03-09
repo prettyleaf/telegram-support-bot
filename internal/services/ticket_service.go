@@ -8,6 +8,7 @@ import (
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
+	"remnafamily/internal/keyboards"
 	"remnafamily/internal/utils"
 
 	"github.com/go-telegram/bot"
@@ -220,6 +221,11 @@ func (s *TicketService) GetTicketsByUserID(ctx context.Context, userID int64, li
 	return s.db.GetTicketsByUserID(ctx, userID, limit)
 }
 
+// GetTicketMessages gets all messages for a ticket in chronological order.
+func (s *TicketService) GetTicketMessages(ctx context.Context, ticketID int) ([]*database.TicketMessage, error) {
+	return s.db.GetTicketMessages(ctx, ticketID)
+}
+
 // GetAllOpenTickets gets all open tickets
 func (s *TicketService) GetAllOpenTickets(ctx context.Context) ([]*database.Ticket, error) {
 	return s.db.GetAllOpenTickets(ctx)
@@ -298,7 +304,8 @@ func (s *TicketService) RecreateTopicForTicket(ctx context.Context, b *bot.Bot, 
 			ticket.GetDisplayName(),
 			ticket.UserID,
 			ticket.CreatedAt.Format("02 Jan 2006 15:04")),
-		ParseMode: models.ParseModeHTML,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.TicketActionsKeyboard(ticket.ID, ticket.IsOpen()),
 	})
 
 	return nil
