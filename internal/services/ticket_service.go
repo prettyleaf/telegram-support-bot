@@ -319,22 +319,54 @@ func isTopicDeletedError(err error) bool {
 		strings.Contains(errStr, "bad request: message thread not found")
 }
 
-// checkAndRecreateTopicIfNeeded checks if the topic exists and recreates it if needed
-func (s *TicketService) checkAndRecreateTopicIfNeeded(ctx context.Context, b *bot.Bot, ticket *database.Ticket) error {
-	// If thread ID is 0 or 1 (general topic), we need to recreate
-	if ticket.ThreadID <= 1 {
-		return s.RecreateTopicForTicket(ctx, b, ticket)
+func (s *TicketService) ensureTopicReady(ctx context.Context, b *bot.Bot, ticket *database.Ticket) error {
+	const maxAttempts = 3
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ticket.ThreadID <= 1 {
+			if err := s.RecreateTopicForTicket(ctx, b, ticket); err != nil {
+				return fmt.Errorf("recreate topic: %w", err)
+			}
+			continue
+		}
+
+		probeMsg, err := b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              ticket.SupportChatID,
+			MessageThreadID:     int(ticket.ThreadID),
+			Text:                ".",
+			DisableNotification: true,
+		})
+		if isTopicDeletedError(err) {
+			if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
+				return fmt.Errorf("recreate deleted topic: %w", recreateErr)
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("probe topic: %w", err)
+		}
+		if probeMsg == nil {
+			return fmt.Errorf("probe topic: empty response")
+		}
+
+		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+			ChatID:    ticket.SupportChatID,
+			MessageID: probeMsg.ID,
+		})
+
+		if probeMsg.MessageThreadID == int(ticket.ThreadID) {
+			return nil
+		}
+
+		if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
+			return fmt.Errorf("recreate redirected topic: %w", recreateErr)
+		}
 	}
-	return nil
+
+	return fmt.Errorf("topic was not ready after %d attempts", maxAttempts)
 }
 
-// ForwardMessageToThread forwards a user message to the ticket thread
-func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
-	// First check if topic needs recreation (thread ID is 0 or 1)
-	if err := s.checkAndRecreateTopicIfNeeded(ctx, b, ticket); err != nil {
-		return nil, fmt.Errorf("failed to ensure topic exists: %w", err)
-	}
-
+func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
 	// Build message text with user info header
 	displayName := ticket.GetDisplayName()
 	header := fmt.Sprintf("📩 <b>From:</b> %s (ID: <code>%d</code>)\n\n", utils.EscapeHTML(displayName), ticket.UserID)
@@ -437,27 +469,57 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 		})
 	}
 
-	// If topic was deleted, recreate it and retry
-	if isTopicDeletedError(err) {
-		if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
-			return nil, fmt.Errorf("topic deleted and failed to recreate: %w", recreateErr)
-		}
-		// Retry sending the message with the new thread ID
-		return s.ForwardMessageToThread(ctx, b, ticket, message)
-	}
+	return sentMsg, err
+}
 
-	// Check if the message was sent to the wrong thread (e.g., general topic)
-	// This can happen if Telegram silently redirects to general topic
-	if err == nil && sentMsg != nil && sentMsg.MessageThreadID != int(ticket.ThreadID) {
-		// Message went to wrong thread, recreate topic and retry
+// ForwardMessageToThread forwards a user message to the ticket thread
+func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
+	releaseLock, err := s.db.AcquireTicketThreadLock(ctx, ticket.ID)
+	if err != nil {
+		return nil, fmt.Errorf("acquire ticket thread lock: %w", err)
+	}
+	defer func() {
+		if unlockErr := releaseLock(); unlockErr != nil {
+			utils.LogError("release ticket thread lock", unlockErr)
+		}
+	}()
+
+	const maxAttempts = 3
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := s.ensureTopicReady(ctx, b, ticket); err != nil {
+			return nil, fmt.Errorf("failed to ensure topic exists: %w", err)
+		}
+
+		sentMsg, err := s.sendMessageToThread(ctx, b, ticket, message)
+		if isTopicDeletedError(err) {
+			if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
+				return nil, fmt.Errorf("topic deleted and failed to recreate: %w", recreateErr)
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if sentMsg == nil {
+			return nil, fmt.Errorf("send message to thread: empty response")
+		}
+
+		if sentMsg.MessageThreadID == int(ticket.ThreadID) {
+			return sentMsg, nil
+		}
+
+		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+			ChatID:    ticket.SupportChatID,
+			MessageID: sentMsg.ID,
+		})
+
 		if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
 			return nil, fmt.Errorf("message sent to wrong thread, failed to recreate topic: %w", recreateErr)
 		}
-		// Retry sending the message with the new thread ID
-		return s.ForwardMessageToThread(ctx, b, ticket, message)
 	}
 
-	return sentMsg, err
+	return nil, fmt.Errorf("failed to forward message after %d attempts", maxAttempts)
 }
 
 // ForwardReplyToUser forwards an admin reply to the user

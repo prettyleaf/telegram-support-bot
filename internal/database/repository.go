@@ -23,6 +23,33 @@ func NewRepository() *Repository {
 
 // Ticket Operations
 
+func (r *Repository) acquireAdvisoryLock(ctx context.Context, key int64) (func() error, error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key); err != nil {
+		conn.Release()
+		return nil, err
+	}
+
+	released := false
+	return func() error {
+		if released {
+			return nil
+		}
+		released = true
+
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, key)
+		conn.Release()
+		return unlockErr
+	}, nil
+}
+
 // CreateTicket creates a new support ticket
 func (r *Repository) CreateTicket(ctx context.Context, ticket *Ticket) error {
 	// Sanitize string fields to ensure valid UTF-8
@@ -224,30 +251,12 @@ func (r *Repository) UpdateTicketThreadID(ctx context.Context, ticketID int, thr
 
 // AcquireTicketCreationLock serializes ticket creation for a specific user across workers.
 func (r *Repository) AcquireTicketCreationLock(ctx context.Context, userID int64) (func() error, error) {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return nil, err
-	}
+	return r.acquireAdvisoryLock(ctx, userID)
+}
 
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, userID); err != nil {
-		conn.Release()
-		return nil, err
-	}
-
-	released := false
-	return func() error {
-		if released {
-			return nil
-		}
-		released = true
-
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		_, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, userID)
-		conn.Release()
-		return unlockErr
-	}, nil
+// AcquireTicketThreadLock serializes topic recreation/message forwarding for a specific ticket.
+func (r *Repository) AcquireTicketThreadLock(ctx context.Context, ticketID int) (func() error, error) {
+	return r.acquireAdvisoryLock(ctx, -int64(ticketID)-1)
 }
 
 // ReserveNextTicketIdentity reserves the next ticket ID and returns the formatted ticket number.

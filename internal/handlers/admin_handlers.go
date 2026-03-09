@@ -529,12 +529,12 @@ func (h *AdminHandlers) HandlePriority(ctx context.Context, b *bot.Bot, update *
 	}
 
 	parts := strings.Fields(update.Message.Text)
-	
+
 	// Try to get ticket from argument or thread
 	var ticket *database.Ticket
 	var err error
 	var priorityArg string
-	
+
 	// Check if first arg is a ticket number
 	if len(parts) >= 2 {
 		ticket, err = h.deps.TicketService.GetTicketByNumber(ctx, strings.TrimPrefix(parts[1], "#"))
@@ -553,7 +553,7 @@ func (h *AdminHandlers) HandlePriority(ctx context.Context, b *bot.Bot, update *
 	} else {
 		ticket, err = h.getTicketFromMessage(ctx, update.Message)
 	}
-	
+
 	if ticket == nil || err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
@@ -795,9 +795,9 @@ func (h *AdminHandlers) HandleBanned(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    update.Message.Chat.ID,
-		Text:      sb.String(),
-		ParseMode: models.ParseModeHTML,
+		ChatID:      update.Message.Chat.ID,
+		Text:        sb.String(),
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: keyboards.BannedUsersKeyboard(users),
 	})
 }
@@ -814,11 +814,11 @@ func (h *AdminHandlers) HandleNote(ctx context.Context, b *bot.Bot, update *mode
 	}
 
 	parts := strings.Fields(update.Message.Text)
-	
+
 	var ticket *database.Ticket
 	var err error
 	var noteText string
-	
+
 	// Check if first arg is a ticket number
 	if len(parts) >= 2 {
 		ticket, err = h.deps.TicketService.GetTicketByNumber(ctx, strings.TrimPrefix(parts[1], "#"))
@@ -837,7 +837,7 @@ func (h *AdminHandlers) HandleNote(ctx context.Context, b *bot.Bot, update *mode
 	} else {
 		ticket, err = h.getTicketFromMessage(ctx, update.Message)
 	}
-	
+
 	if ticket == nil || err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          update.Message.Chat.ID,
@@ -1068,8 +1068,17 @@ func (h *AdminHandlers) HandleAdminCallback(ctx context.Context, b *bot.Bot, upd
 	}
 }
 
+func callbackMessage(callback *models.CallbackQuery) *models.Message {
+	if callback == nil || callback.Message.Type != models.MaybeInaccessibleMessageTypeMessage {
+		return nil
+	}
+
+	return callback.Message.Message
+}
+
 func (h *AdminHandlers) handleTicketCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, adminID int64, parts []string) {
-	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+	msg := callbackMessage(callback)
+	if msg == nil || len(parts) < 3 {
 		return
 	}
 
@@ -1084,9 +1093,9 @@ func (h *AdminHandlers) handleTicketCallback(ctx context.Context, b *bot.Bot, ca
 		return
 	}
 
-	chatID := callback.Message.Message.Chat.ID
-	messageID := callback.Message.Message.ID
-	threadID := callback.Message.Message.MessageThreadID
+	chatID := msg.Chat.ID
+	messageID := msg.ID
+	threadID := msg.MessageThreadID
 
 	switch action {
 	case "view":
@@ -1241,7 +1250,8 @@ func (h *AdminHandlers) handleTicketCallback(ctx context.Context, b *bot.Bot, ca
 }
 
 func (h *AdminHandlers) handlePriorityCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
-	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+	msg := callbackMessage(callback)
+	if msg == nil || len(parts) < 3 {
 		return
 	}
 	if config.YAMLCfg != nil && !config.YAMLCfg.Tickets.PriorityEnabled {
@@ -1260,15 +1270,16 @@ func (h *AdminHandlers) handlePriorityCallback(ctx context.Context, b *bot.Bot, 
 	}
 
 	_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-		ChatID:    callback.Message.Message.Chat.ID,
-		MessageID: callback.Message.Message.ID,
+		ChatID:    msg.Chat.ID,
+		MessageID: msg.ID,
 		Text:      fmt.Sprintf("✅ Priority set to <b>%s</b>", priority),
 		ParseMode: models.ParseModeHTML,
 	})
 }
 
 func (h *AdminHandlers) handleTicketsCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
-	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 2 {
+	msg := callbackMessage(callback)
+	if msg == nil || len(parts) < 2 {
 		return
 	}
 
@@ -1298,13 +1309,14 @@ func (h *AdminHandlers) handleTicketsCallback(ctx context.Context, b *bot.Bot, c
 		return
 	}
 
-	if err := h.sendTicketList(ctx, b, callback.Message.Message.Chat.ID, callback.Message.Message.MessageThreadID, page, filter, callback.Message.Message.ID); err != nil {
+	if err := h.sendTicketList(ctx, b, msg.Chat.ID, msg.MessageThreadID, page, filter, msg.ID); err != nil {
 		utils.LogError("refresh ticket list", err)
 	}
 }
 
 func (h *AdminHandlers) handleBannedCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
-	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 {
+	msg := callbackMessage(callback)
+	if msg == nil || len(parts) < 3 {
 		return
 	}
 
@@ -1345,7 +1357,7 @@ func (h *AdminHandlers) handleBannedCallback(ctx context.Context, b *bot.Bot, ca
 		)
 
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:      callback.Message.Message.Chat.ID,
+			ChatID:      msg.Chat.ID,
 			Text:        text,
 			ParseMode:   models.ParseModeHTML,
 			ReplyMarkup: keyboards.BannedUserActionsKeyboard(userID),
@@ -1358,7 +1370,7 @@ func (h *AdminHandlers) handleBannedCallback(ctx context.Context, b *bot.Bot, ca
 		}
 
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    callback.Message.Message.Chat.ID,
+			ChatID:    msg.Chat.ID,
 			Text:      fmt.Sprintf("✅ User <code>%d</code> has been unbanned.", userID),
 			ParseMode: models.ParseModeHTML,
 		})
@@ -1366,7 +1378,8 @@ func (h *AdminHandlers) handleBannedCallback(ctx context.Context, b *bot.Bot, ca
 }
 
 func (h *AdminHandlers) handleCannedCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
-	if callback.Message == nil || callback.Message.Message == nil || len(parts) < 3 || parts[1] != "use" {
+	msg := callbackMessage(callback)
+	if msg == nil || len(parts) < 3 || parts[1] != "use" {
 		return
 	}
 
@@ -1380,10 +1393,10 @@ func (h *AdminHandlers) handleCannedCallback(ctx context.Context, b *bot.Bot, ca
 		return
 	}
 
-	ticket, err := h.getTicketFromMessage(ctx, callback.Message.Message)
+	ticket, err := h.getTicketFromMessage(ctx, msg)
 	if err != nil || ticket == nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    callback.Message.Message.Chat.ID,
+			ChatID:    msg.Chat.ID,
 			Text:      fmt.Sprintf("📝 <b>%s</b>\n\n%s", utils.EscapeHTML(response.Title), utils.EscapeHTML(response.Content)),
 			ParseMode: models.ParseModeHTML,
 		})
@@ -1396,8 +1409,8 @@ func (h *AdminHandlers) handleCannedCallback(ctx context.Context, b *bot.Bot, ca
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          callback.Message.Message.Chat.ID,
-		MessageThreadID: callback.Message.Message.MessageThreadID,
+		ChatID:          msg.Chat.ID,
+		MessageThreadID: msg.MessageThreadID,
 		Text:            fmt.Sprintf("✅ Sent canned response <code>/%s</code> to the user.", utils.EscapeHTML(shortcut)),
 		ParseMode:       models.ParseModeHTML,
 	})
@@ -1471,13 +1484,13 @@ func (h *AdminHandlers) sendCannedResponseToTicket(ctx context.Context, b *bot.B
 	}
 
 	ticketMessage := &database.TicketMessage{
-		TicketID:       ticket.ID,
-		SenderID:       admin.ID,
-		SenderName:     utils.GetUserNamePtr(admin),
-		SenderUsername: utils.GetUsernamePtr(admin),
-		IsAdmin:        true,
-		MessageText:    &response.Content,
-		MessageID:      func() *int64 { id := int64(sentMessage.ID); return &id }(),
+		TicketID:          ticket.ID,
+		SenderID:          admin.ID,
+		SenderName:        utils.GetUserNamePtr(admin),
+		SenderUsername:    utils.GetUsernamePtr(admin),
+		IsAdmin:           true,
+		MessageText:       &response.Content,
+		MessageID:         func() *int64 { id := int64(sentMessage.ID); return &id }(),
 		OriginalMessageID: originalMessageID,
 	}
 
@@ -1579,7 +1592,7 @@ func (h *AdminHandlers) getTicketFromMessage(ctx context.Context, message *model
 // getTicketFromCommandOrThread tries to get ticket from command argument first, then falls back to thread
 func (h *AdminHandlers) getTicketFromCommandOrThread(ctx context.Context, message *models.Message) (*database.Ticket, error) {
 	parts := strings.Fields(message.Text)
-	
+
 	// Try to parse ticket number from first argument
 	if len(parts) >= 2 {
 		ticketNum := strings.TrimPrefix(parts[1], "#")
@@ -1588,7 +1601,7 @@ func (h *AdminHandlers) getTicketFromCommandOrThread(ctx context.Context, messag
 			return ticket, nil
 		}
 	}
-	
+
 	// Fallback to getting ticket from thread
 	return h.getTicketFromMessage(ctx, message)
 }

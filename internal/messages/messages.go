@@ -34,7 +34,7 @@ func GetWelcomeMessageLang(lang string) string {
 /cancel - Отменить текущую операцию
 /language - Сменить язык`
 	}
-	
+
 	if config.YAMLCfg != nil && config.YAMLCfg.Messages.Welcome != "" {
 		return config.YAMLCfg.Messages.Welcome
 	}
@@ -63,7 +63,7 @@ func GetTicketCreatedMessageLang(ticketNumber string, lang string) string {
 		msg = `✅ <b>Тикет #{ticket_number} создан!</b>
 
 Наша команда поддержки уведомлена и скоро ответит.
-Все ваши сообщения будут переданы команде поддержки.`
+Все следующие сообщения в этом чате будут автоматически добавляться в этот тикет.`
 	} else {
 		if config.YAMLCfg != nil {
 			msg = config.YAMLCfg.Messages.TicketCreated
@@ -72,7 +72,7 @@ func GetTicketCreatedMessageLang(ticketNumber string, lang string) string {
 			msg = `✅ <b>Ticket #{ticket_number} created!</b>
 
 Our support team has been notified and will respond shortly.
-All your messages will be forwarded to the support team.`
+All next messages in this chat will be added to this ticket automatically.`
 		}
 	}
 	return strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
@@ -309,14 +309,6 @@ func GetAdminHelpMessage() string {
 /[shortcut] - Use canned response
 
 Reply to messages in ticket threads to respond to users.`
-}
-
-// GetMessageSentConfirmation returns message sent confirmation in specified language
-func GetMessageSentConfirmation(lang string) string {
-	if lang == database.LangRussian {
-		return "✅ Сообщение отправлено команде поддержки."
-	}
-	return "✅ Message sent to support team."
 }
 
 // GetMessageSendError returns message send error in specified language

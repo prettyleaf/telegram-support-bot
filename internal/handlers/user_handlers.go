@@ -452,19 +452,17 @@ func (h *UserHandlers) forwardUserMessage(ctx context.Context, b *bot.Bot, ticke
 		MessageID:         func() *int64 { id := int64(sentMsg.ID); return &id }(),
 		OriginalMessageID: func() *int64 { id := int64(message.ID); return &id }(),
 		HasMedia:          hasMedia,
-		MediaType:         func() *string { if mediaType == "" { return nil }; return &mediaType }(),
+		MediaType: func() *string {
+			if mediaType == "" {
+				return nil
+			}
+			return &mediaType
+		}(),
 	}
 
 	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {
 		utils.LogError("save ticket message", err)
 	}
-
-	// Send delivery confirmation (optional, can be disabled)
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    ticket.UserID,
-		Text:      messages.GetMessageSentConfirmation(lang),
-		ParseMode: models.ParseModeHTML,
-	})
 }
 
 // HandleUserCallback handles callbacks from users
