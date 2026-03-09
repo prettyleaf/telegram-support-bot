@@ -321,49 +321,53 @@ func isTopicDeletedError(err error) bool {
 
 func (s *TicketService) ensureTopicReady(ctx context.Context, b *bot.Bot, ticket *database.Ticket) error {
 	const maxAttempts = 3
+	const recreateWait = 400 * time.Millisecond
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ticket.ThreadID <= 1 {
 			if err := s.RecreateTopicForTicket(ctx, b, ticket); err != nil {
 				return fmt.Errorf("recreate topic: %w", err)
 			}
+			if err := waitForTopicPropagation(ctx, recreateWait); err != nil {
+				return err
+			}
 			continue
 		}
 
-		probeMsg, err := b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              ticket.SupportChatID,
-			MessageThreadID:     int(ticket.ThreadID),
-			Text:                ".",
-			DisableNotification: true,
+		_, err := b.SendChatAction(ctx, &bot.SendChatActionParams{
+			ChatID:          ticket.SupportChatID,
+			MessageThreadID: int(ticket.ThreadID),
+			Action:          models.ChatActionTyping,
 		})
 		if isTopicDeletedError(err) {
 			if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
 				return fmt.Errorf("recreate deleted topic: %w", recreateErr)
+			}
+			if err := waitForTopicPropagation(ctx, recreateWait); err != nil {
+				return err
 			}
 			continue
 		}
 		if err != nil {
 			return fmt.Errorf("probe topic: %w", err)
 		}
-		if probeMsg == nil {
-			return fmt.Errorf("probe topic: empty response")
-		}
 
-		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
-			ChatID:    ticket.SupportChatID,
-			MessageID: probeMsg.ID,
-		})
-
-		if probeMsg.MessageThreadID == int(ticket.ThreadID) {
-			return nil
-		}
-
-		if recreateErr := s.RecreateTopicForTicket(ctx, b, ticket); recreateErr != nil {
-			return fmt.Errorf("recreate redirected topic: %w", recreateErr)
-		}
+		return nil
 	}
 
 	return fmt.Errorf("topic was not ready after %d attempts", maxAttempts)
+}
+
+func waitForTopicPropagation(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
