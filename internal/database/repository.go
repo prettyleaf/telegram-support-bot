@@ -30,6 +30,26 @@ func (r *Repository) CreateTicket(ctx context.Context, ticket *Ticket) error {
 	ticket.UserUsername = utils.SanitizeUTF8Ptr(ticket.UserUsername)
 	ticket.Subject = utils.SanitizeUTF8Ptr(ticket.Subject)
 
+	if ticket.ID > 0 {
+		query := `
+			INSERT INTO tickets (id, ticket_number, user_id, user_name, user_username, support_chat_id, thread_id, status, priority, subject)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING id, created_at, updated_at
+		`
+		return pool.QueryRow(ctx, query,
+			ticket.ID,
+			ticket.TicketNumber,
+			ticket.UserID,
+			ticket.UserName,
+			ticket.UserUsername,
+			ticket.SupportChatID,
+			ticket.ThreadID,
+			ticket.Status,
+			ticket.Priority,
+			ticket.Subject,
+		).Scan(&ticket.ID, &ticket.CreatedAt, &ticket.UpdatedAt)
+	}
+
 	query := `
 		INSERT INTO tickets (ticket_number, user_id, user_name, user_username, support_chat_id, thread_id, status, priority, subject)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -202,25 +222,57 @@ func (r *Repository) UpdateTicketThreadID(ctx context.Context, ticketID int, thr
 	return err
 }
 
-// GetNextTicketNumber generates the next ticket number
-func (r *Repository) GetNextTicketNumber(ctx context.Context) (string, error) {
-	var maxID int
-	query := `SELECT COALESCE(MAX(id), 0) + 1 FROM tickets`
-	err := pool.QueryRow(ctx, query).Scan(&maxID)
+// AcquireTicketCreationLock serializes ticket creation for a specific user across workers.
+func (r *Repository) AcquireTicketCreationLock(ctx context.Context, userID int64) (func() error, error) {
+	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	number := fmt.Sprintf("%d", maxID)
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, userID); err != nil {
+		conn.Release()
+		return nil, err
+	}
+
+	released := false
+	return func() error {
+		if released {
+			return nil
+		}
+		released = true
+
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, userID)
+		conn.Release()
+		return unlockErr
+	}, nil
+}
+
+// ReserveNextTicketIdentity reserves the next ticket ID and returns the formatted ticket number.
+func (r *Repository) ReserveNextTicketIdentity(ctx context.Context) (int, string, error) {
+	var nextID int64
+	query := `SELECT nextval(pg_get_serial_sequence('tickets', 'id'))`
+	err := pool.QueryRow(ctx, query).Scan(&nextID)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return int(nextID), formatTicketNumber(nextID), nil
+}
+
+func formatTicketNumber(id int64) string {
+	number := fmt.Sprintf("%d", id)
 	prefix := ""
 	if config.YAMLCfg != nil {
 		prefix = strings.TrimSpace(config.YAMLCfg.Tickets.NumberPrefix)
 	}
 	if prefix == "" {
-		return number, nil
+		return number
 	}
 
-	return fmt.Sprintf("%s-%s", prefix, number), nil
+	return fmt.Sprintf("%s-%s", prefix, number)
 }
 
 // Ticket Message Operations
@@ -319,7 +371,7 @@ func (r *Repository) IsUserBanned(ctx context.Context, userID int64) (bool, erro
 func (r *Repository) GetBannedUser(ctx context.Context, userID int64) (*BannedUser, error) {
 	query := `SELECT * FROM banned_users WHERE user_id = $1`
 	row := pool.QueryRow(ctx, query, userID)
-	
+
 	var ban BannedUser
 	err := row.Scan(
 		&ban.ID, &ban.UserID, &ban.UserName, &ban.UserUsername,
@@ -376,7 +428,7 @@ func (r *Repository) CreateCannedResponse(ctx context.Context, resp *CannedRespo
 func (r *Repository) GetCannedResponse(ctx context.Context, shortcut string) (*CannedResponse, error) {
 	query := `SELECT * FROM canned_responses WHERE shortcut = $1`
 	row := pool.QueryRow(ctx, query, shortcut)
-	
+
 	var resp CannedResponse
 	err := row.Scan(
 		&resp.ID, &resp.Shortcut, &resp.Title, &resp.Content,
@@ -511,7 +563,7 @@ func (r *Repository) HasUserSettings(ctx context.Context, userID int64) (bool, e
 
 func (r *Repository) scanTicket(ctx context.Context, query string, args ...interface{}) (*Ticket, error) {
 	row := pool.QueryRow(ctx, query, args...)
-	
+
 	var t Ticket
 	err := row.Scan(
 		&t.ID, &t.TicketNumber, &t.UserID, &t.UserName, &t.UserUsername,

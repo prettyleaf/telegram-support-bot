@@ -26,6 +26,16 @@ func NewTicketService(db *database.Repository) *TicketService {
 
 // CreateTicket creates a new support ticket with a forum topic
 func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int64, userName, userUsername *string, subject string) (*database.Ticket, error) {
+	releaseLock, err := s.db.AcquireTicketCreationLock(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("acquire ticket creation lock: %w", err)
+	}
+	defer func() {
+		if unlockErr := releaseLock(); unlockErr != nil {
+			utils.LogError("release ticket creation lock", unlockErr)
+		}
+	}()
+
 	// Check if user is banned
 	banned, err := s.db.IsUserBanned(ctx, userID)
 	if err != nil {
@@ -63,10 +73,10 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 		}
 	}
 
-	// Generate ticket number
-	ticketNumber, err := s.db.GetNextTicketNumber(ctx)
+	// Reserve the next ticket ID/number atomically so concurrent creates cannot collide.
+	ticketID, ticketNumber, err := s.db.ReserveNextTicketIdentity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("generate ticket number: %w", err)
+		return nil, fmt.Errorf("reserve ticket identity: %w", err)
 	}
 
 	// Create forum topic name
@@ -76,10 +86,10 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 	} else if userName != nil && *userName != "" {
 		displayName = *userName
 	}
-	
+
 	topicName := strings.ReplaceAll(config.YAMLCfg.Thread.NameFormat, "{ticket_number}", ticketNumber)
 	topicName = strings.ReplaceAll(topicName, "{user_name}", displayName)
-	
+
 	// Truncate topic name if too long (Telegram limit is 128 characters)
 	if len(topicName) > 128 {
 		topicName = topicName[:125] + "..."
@@ -87,8 +97,8 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 
 	// Create forum topic in support chat
 	topic, err := b.CreateForumTopic(ctx, &bot.CreateForumTopicParams{
-		ChatID: config.Cfg.SupportChatID,
-		Name:   topicName,
+		ChatID:    config.Cfg.SupportChatID,
+		Name:      topicName,
 		IconColor: config.YAMLCfg.Thread.IconColor,
 	})
 	if err != nil {
@@ -102,6 +112,7 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 	}
 
 	ticket := &database.Ticket{
+		ID:            ticketID,
 		TicketNumber:  ticketNumber,
 		UserID:        userID,
 		UserName:      userName,
@@ -452,7 +463,7 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 // ForwardReplyToUser forwards an admin reply to the user
 func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message, adminName string) (*models.Message, error) {
 	header := fmt.Sprintf("💬 <b>Support Reply</b> (Ticket #%s)\n\n", ticket.TicketNumber)
-	
+
 	var sentMsg *models.Message
 	var err error
 
