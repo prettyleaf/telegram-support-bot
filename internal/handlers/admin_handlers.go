@@ -1509,11 +1509,6 @@ func (h *AdminHandlers) sendCannedResponseToTicket(ctx context.Context, b *bot.B
 	return h.deps.TicketService.SaveMessage(ctx, ticketMessage)
 }
 
-type exportForwardSource struct {
-	chatID    any
-	messageID int
-}
-
 func (h *AdminHandlers) exportTicketHistory(ctx context.Context, b *bot.Bot, ticket *database.Ticket, chatID int64, threadID int) error {
 	messages, err := h.deps.TicketService.GetTicketMessages(ctx, ticket.ID)
 	if err != nil {
@@ -1537,90 +1532,7 @@ func (h *AdminHandlers) exportTicketHistory(ctx context.Context, b *bot.Bot, tic
 		return fmt.Errorf("send export document: %w", err)
 	}
 
-	forwardedMedia := 0
-	failedMedia := 0
-	for _, msg := range messages {
-		if !msg.HasMedia {
-			continue
-		}
-
-		if h.forwardMessageForExport(ctx, b, ticket, msg, chatID, threadID) {
-			forwardedMedia++
-		} else {
-			failedMedia++
-		}
-	}
-
-	summary := fmt.Sprintf(
-		"📤 Exported ticket <b>#%s</b>\nMessages: %d\nMedia forwarded: %d",
-		ticket.TicketNumber,
-		len(messages),
-		forwardedMedia,
-	)
-	if failedMedia > 0 {
-		summary += fmt.Sprintf("\nMedia not forwarded: %d", failedMedia)
-	}
-
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:              chatID,
-		MessageThreadID:     threadID,
-		Text:                summary,
-		ParseMode:           models.ParseModeHTML,
-		DisableNotification: true,
-	})
-
 	return nil
-}
-
-func (h *AdminHandlers) forwardMessageForExport(ctx context.Context, b *bot.Bot, ticket *database.Ticket, msg *database.TicketMessage, chatID int64, threadID int) bool {
-	for _, source := range exportForwardSources(ticket, msg) {
-		if source.messageID <= 0 {
-			continue
-		}
-
-		_, err := b.ForwardMessage(ctx, &bot.ForwardMessageParams{
-			ChatID:              chatID,
-			MessageThreadID:     threadID,
-			FromChatID:          source.chatID,
-			MessageID:           source.messageID,
-			DisableNotification: true,
-		})
-		if err == nil {
-			return true
-		}
-	}
-
-	return false
-}
-
-func exportForwardSources(ticket *database.Ticket, msg *database.TicketMessage) []exportForwardSource {
-	var sources []exportForwardSource
-	addSource := func(chatID any, messageID *int64) {
-		if messageID == nil || *messageID <= 0 {
-			return
-		}
-
-		candidate := exportForwardSource{
-			chatID:    chatID,
-			messageID: int(*messageID),
-		}
-		for _, existing := range sources {
-			if existing.chatID == candidate.chatID && existing.messageID == candidate.messageID {
-				return
-			}
-		}
-		sources = append(sources, candidate)
-	}
-
-	if msg.IsAdmin {
-		addSource(ticket.SupportChatID, msg.OriginalMessageID)
-		addSource(ticket.UserID, msg.MessageID)
-		return sources
-	}
-
-	addSource(ticket.UserID, msg.OriginalMessageID)
-	addSource(ticket.SupportChatID, msg.MessageID)
-	return sources
 }
 
 func buildTicketHistoryHTML(ticket *database.Ticket, messages []*database.TicketMessage) string {
