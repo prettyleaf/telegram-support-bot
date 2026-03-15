@@ -3,6 +3,7 @@ package messages
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
@@ -365,6 +366,74 @@ func GetLanguageChanged(lang string) string {
 		return "✅ Язык изменён на Русский."
 	}
 	return "✅ Language changed to English."
+}
+
+// GetHWIDPromptMessage returns the prompt shown after an HWID-related trigger.
+func GetHWIDPromptMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "🧩 <b>Похоже, вопрос связан с HWID или подключёнными устройствами.</b>\n\nХотите изменить свои подключённые устройства прямо в панели?"
+	}
+	return "🧩 <b>Your message looks related to HWID or connected devices.</b>\n\nDo you want to manage your connected devices directly in the panel?"
+}
+
+// GetHWIDUserSelectionMessage asks the user to choose a panel account.
+func GetHWIDUserSelectionMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "👤 <b>Найдено несколько профилей панели.</b>\n\nВыберите, для какого профиля показать управление подключёнными устройствами."
+	}
+	return "👤 <b>Multiple panel users were found.</b>\n\nChoose which panel profile should be used for device management."
+}
+
+// GetHWIDPanelErrorMessage returns a generic panel integration error.
+func GetHWIDPanelErrorMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Не удалось открыть управление устройствами в панели. Администраторы уже увидят повышенный приоритет тикета."
+	}
+	return "⚠️ Failed to open panel device management. The ticket priority has still been escalated for admins."
+}
+
+// GetHWIDNoPanelUsersMessage returns the response when no panel profile is found for a Telegram user.
+func GetHWIDNoPanelUsersMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Я не нашёл профиль панели, связанный с вашим Telegram ID. Тикет уже поднят по приоритету, администраторы это увидят."
+	}
+	return "⚠️ I couldn't find a panel profile linked to your Telegram ID. The ticket has already been escalated for admins."
+}
+
+// GetHWIDTicketUnavailableMessage returns the response when the related ticket is no longer open.
+func GetHWIDTicketUnavailableMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Этот тикет уже недоступен для управления устройствами."
+	}
+	return "⚠️ This ticket is no longer available for device management."
+}
+
+// GetHWIDDeleteSuccessMessage confirms that a device has been removed.
+func GetHWIDDeleteSuccessMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "✅ Устройство удалено из панели."
+	}
+	return "✅ The device was removed from the panel."
+}
+
+// GetHWIDDeleteCooldownMessage returns the cooldown message for HWID deletion.
+func GetHWIDDeleteCooldownMessage(remaining time.Duration, lang string) string {
+	if remaining < time.Minute {
+		remaining = time.Minute
+	}
+	hours := int(remaining.Hours())
+	minutes := int(remaining.Minutes()) % 60
+
+	if lang == database.LangRussian {
+		if hours > 0 {
+			return fmt.Sprintf("⏳ Следующее удаление будет доступно через %d ч. %d мин.", hours, minutes)
+		}
+		return fmt.Sprintf("⏳ Следующее удаление будет доступно через %d мин.", minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("⏳ The next device removal will be available in %d hour(s) %d minute(s).", hours, minutes)
+	}
+	return fmt.Sprintf("⏳ The next device removal will be available in %d minute(s).", minutes)
 }
 
 // Helper functions

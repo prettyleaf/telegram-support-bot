@@ -8,6 +8,12 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
+// CallbackOption is a small helper for inline keyboards with dynamic callbacks.
+type CallbackOption struct {
+	Text string
+	Data string
+}
+
 // NewTicketKeyboard creates the keyboard for starting a new ticket
 func NewTicketKeyboard() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{
@@ -195,6 +201,55 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
 	}
+}
+
+// HWIDPromptKeyboard asks the user whether they want to manage panel devices.
+func HWIDPromptKeyboard(ticketID int, lang string) *models.InlineKeyboardMarkup {
+	yesText := "✅ Yes"
+	noText := "❌ No"
+	if lang == database.LangRussian {
+		yesText = "✅ Да"
+		noText = "❌ Нет"
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: yesText, CallbackData: fmt.Sprintf("hwid:y:%d", ticketID)},
+				{Text: noText, CallbackData: fmt.Sprintf("hwid:n:%d", ticketID)},
+			},
+		},
+	}
+}
+
+// HWIDUserSelectionKeyboard builds account selection buttons for panel users.
+func HWIDUserSelectionKeyboard(options []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(options)+1)
+	for _, option := range options {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: option.Text, CallbackData: option.Data},
+		})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: refreshLabel, CallbackData: refreshCallback},
+	})
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+}
+
+// HWIDManagementKeyboard builds the device management actions.
+func HWIDManagementKeyboard(deviceButtons []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(deviceButtons)+1)
+	for _, option := range deviceButtons {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: option.Text, CallbackData: option.Data},
+		})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: refreshLabel, CallbackData: refreshCallback},
+	})
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 }
 
 // ConfirmCloseKeyboard creates confirmation keyboard for closing ticket

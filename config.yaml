@@ -23,6 +23,26 @@ tickets:
   # Default priority: low, normal, high, urgent
   default_priority: normal
 
+# HWID support flow
+hwid:
+  # Enable the automatic HWID/device-management prompt for matching ticket messages
+  enabled: true
+
+  # Users can remove panel devices once per X hours (0 = no cooldown)
+  delete_cooldown_hours: 24
+
+  # Add extra phrases here to widen the trigger filter
+  trigger_keywords:
+    - "hwid"
+    - "хвид"
+    - "удалить устройство"
+    - "удаление устройства"
+    - "лимит устройств"
+    - "лимит устройства"
+    - "delete device"
+    - "remove device"
+    - "device limit"
+
 # Message overrides (optional)
 messages:
   # Automated support reply sent immediately after a new ticket is opened

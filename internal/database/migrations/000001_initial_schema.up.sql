@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     id SERIAL PRIMARY KEY,
     user_id BIGINT UNIQUE NOT NULL,
     language VARCHAR(10) NOT NULL DEFAULT 'en',
+    last_hwid_delete_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

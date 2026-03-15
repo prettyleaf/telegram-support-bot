@@ -11,9 +11,10 @@ import (
 
 // Dependencies holds all the dependencies needed by handlers and services
 type Dependencies struct {
-	Bot           *bot.Bot
-	DB            *database.Repository
-	State         *state.AppState
-	Config        *config.Config
-	TicketService *services.TicketService
+	Bot              *bot.Bot
+	DB               *database.Repository
+	State            *state.AppState
+	Config           *config.Config
+	TicketService    *services.TicketService
+	RemnawaveService *services.RemnawaveService
 }
