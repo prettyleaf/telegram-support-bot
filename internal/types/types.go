@@ -15,6 +15,7 @@ type Dependencies struct {
 	DB               *database.Repository
 	State            *state.AppState
 	Config           *config.Config
+	CaptchaService   *services.CaptchaService
 	TicketService    *services.TicketService
 	RemnawaveService *services.RemnawaveService
 }

@@ -23,6 +23,34 @@ tickets:
   # Default priority: low, normal, high, urgent
   default_priority: normal
 
+# Onboarding captcha shown before the user can use the bot
+captcha:
+  # Enable captcha on first launch and before other private actions
+  enabled: true
+
+  # Types: math, button, text, custom
+  type: custom
+
+  # How long the current captcha stays valid
+  timeout_seconds: 120
+
+  # Used when type=custom
+  questions:
+    - question: "Сколько будет 2 + 2? / How much is 2 + 2?"
+      correct_answer: "4"
+      options:
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+    - question: "Нажмите на слово Support / Tap the word Support"
+      correct_answer: "Support"
+      options:
+        - "Ticket"
+        - "Support"
+        - "Panel"
+        - "Hello"
+
 # HWID support flow
 hwid:
   # Enable the automatic HWID/device-management prompt for matching ticket messages

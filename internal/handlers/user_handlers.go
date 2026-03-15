@@ -27,6 +27,13 @@ type UserHandlers struct {
 	deps *types.Dependencies
 }
 
+type captchaSessionState struct {
+	SessionID    string
+	CorrectIndex int
+	ExpiresAt    time.Time
+	MessageID    int
+}
+
 // NewUserHandlers creates a new user handlers instance
 func NewUserHandlers(deps *types.Dependencies) *UserHandlers {
 	return &UserHandlers{deps: deps}
@@ -55,9 +62,45 @@ func (h *UserHandlers) HandleStart(ctx context.Context, b *bot.Bot, update *mode
 		return
 	}
 
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
 	// Clear any previous state
 	h.deps.State.ClearUserState(userID)
 
+	h.showStartFlow(ctx, b, userID)
+}
+
+// HandleLanguage handles the /language command
+func (h *UserHandlers) HandleLanguage(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	userID := update.Message.From.ID
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      userID,
+		Text:        messages.GetLanguageSelectionMessage(),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.LanguageSelectionKeyboard(),
+	})
+}
+
+// getUserLanguage gets user's language preference
+func (h *UserHandlers) getUserLanguage(ctx context.Context, userID int64) string {
+	lang, err := h.deps.DB.GetUserLanguage(ctx, userID)
+	if err != nil {
+		return "en"
+	}
+	return lang
+}
+
+func (h *UserHandlers) showStartFlow(ctx context.Context, b *bot.Bot, userID int64) {
 	// Check if user has language preference set
 	hasSettings, err := h.deps.DB.HasUserSettings(ctx, userID)
 	if err != nil {
@@ -122,29 +165,107 @@ Just send your message and our support team will receive it.`,
 	})
 }
 
-// HandleLanguage handles the /language command
-func (h *UserHandlers) HandleLanguage(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil || update.Message.From == nil {
+func (h *UserHandlers) ensureUserPassedCaptcha(ctx context.Context, b *bot.Bot, userID int64) bool {
+	if !h.isCaptchaEnabled() {
+		return true
+	}
+
+	passed, err := h.deps.DB.HasPassedCaptcha(ctx, userID)
+	if err != nil {
+		utils.LogError("check user captcha status", err)
+	}
+	if passed {
+		return true
+	}
+
+	h.sendCaptchaChallenge(ctx, b, userID, 0)
+	return false
+}
+
+func (h *UserHandlers) isCaptchaEnabled() bool {
+	return h.deps.CaptchaService != nil && config.YAMLCfg != nil && config.YAMLCfg.Captcha.Enabled
+}
+
+func (h *UserHandlers) sendCaptchaChallenge(ctx context.Context, b *bot.Bot, userID int64, replaceMessageID int) bool {
+	if !h.isCaptchaEnabled() {
+		return true
+	}
+
+	challenge, err := h.deps.CaptchaService.GenerateChallenge(config.YAMLCfg.Captcha)
+	if err != nil {
+		utils.LogError("generate captcha challenge", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    userID,
+			Text:      messages.GetCaptchaErrorMessage(),
+			ParseMode: models.ParseModeHTML,
+		})
+		return false
+	}
+
+	text := messages.GetCaptchaPromptMessage(challenge.Question, config.YAMLCfg.Captcha.TimeoutSeconds)
+	keyboard := keyboards.CaptchaKeyboard(challenge.SessionID, challenge.Options)
+	messageID := replaceMessageID
+
+	if replaceMessageID > 0 {
+		if _, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      userID,
+			MessageID:   replaceMessageID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboard,
+		}); err != nil {
+			utils.LogError("edit captcha message", err)
+			messageID = 0
+		}
+	}
+
+	if messageID == 0 {
+		h.deleteCaptchaMessage(ctx, b, userID)
+
+		msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:      userID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboard,
+		})
+		if err != nil {
+			utils.LogError("send captcha challenge", err)
+			return false
+		}
+		messageID = msg.ID
+	}
+
+	h.deps.State.ClearUserState(userID)
+	h.deps.State.SetUserState(userID, config.StateWaitingCaptcha)
+	h.deps.State.SetUserData(userID, "captcha_session", &captchaSessionState{
+		SessionID:    challenge.SessionID,
+		CorrectIndex: challenge.CorrectIndex,
+		ExpiresAt:    challenge.ExpiresAt,
+		MessageID:    messageID,
+	})
+
+	return true
+}
+
+func (h *UserHandlers) getCaptchaSession(userID int64) (*captchaSessionState, bool) {
+	value := h.deps.State.GetUserData(userID, "captcha_session")
+	session, ok := value.(*captchaSessionState)
+	if !ok || session == nil {
+		return nil, false
+	}
+	return session, true
+}
+
+func (h *UserHandlers) deleteCaptchaMessage(ctx context.Context, b *bot.Bot, userID int64) {
+	session, ok := h.getCaptchaSession(userID)
+	if !ok || session.MessageID == 0 {
 		return
 	}
 
-	userID := update.Message.From.ID
-
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:      userID,
-		Text:        messages.GetLanguageSelectionMessage(),
-		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: keyboards.LanguageSelectionKeyboard(),
+	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    userID,
+		MessageID: session.MessageID,
 	})
-}
-
-// getUserLanguage gets user's language preference
-func (h *UserHandlers) getUserLanguage(ctx context.Context, userID int64) string {
-	lang, err := h.deps.DB.GetUserLanguage(ctx, userID)
-	if err != nil {
-		return "en"
-	}
-	return lang
 }
 
 // HandleNewTicket handles the /newticket command
@@ -155,6 +276,11 @@ func (h *UserHandlers) HandleNewTicket(ctx context.Context, b *bot.Bot, update *
 
 	userID := update.Message.From.ID
 	user := update.Message.From
+
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
 	lang := h.getUserLanguage(ctx, userID)
 
 	// Check if user is banned
@@ -240,6 +366,11 @@ func (h *UserHandlers) HandleMyTickets(ctx context.Context, b *bot.Bot, update *
 	}
 
 	userID := update.Message.From.ID
+
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
 	lang := h.getUserLanguage(ctx, userID)
 
 	tickets, err := h.deps.TicketService.GetTicketsByUserID(ctx, userID, 10)
@@ -274,6 +405,11 @@ func (h *UserHandlers) HandleCancel(ctx context.Context, b *bot.Bot, update *mod
 	}
 
 	userID := update.Message.From.ID
+
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
 	lang := h.getUserLanguage(ctx, userID)
 	h.deps.State.ClearUserState(userID)
 
@@ -293,6 +429,11 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 	message := update.Message
 	userID := message.From.ID
 	user := message.From
+
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
 	lang := h.getUserLanguage(ctx, userID)
 
 	// Check if user is banned
@@ -481,14 +622,40 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 	data := callback.Data
 	userID := callback.From.ID
 
-	// Answer callback to remove loading state
-	defer func() {
+	answered := false
+	answerCallback := func(text string, showAlert bool) {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: callback.ID,
+			Text:            text,
+			ShowAlert:       showAlert,
 		})
+		answered = true
+	}
+
+	defer func() {
+		if answered {
+			return
+		}
+		answerCallback("", false)
 	}()
 
 	parts := strings.Split(data, ":")
+	if parts[0] == "captcha" {
+		h.handleCaptchaCallback(ctx, b, callback, parts, answerCallback)
+		return
+	}
+
+	if h.isCaptchaEnabled() {
+		passed, err := h.deps.DB.HasPassedCaptcha(ctx, userID)
+		if err != nil {
+			utils.LogError("check user captcha status before callback", err)
+		}
+		if !passed {
+			h.sendCaptchaChallenge(ctx, b, userID, 0)
+			answerCallback(messages.GetCaptchaRequiredAlert(), true)
+			return
+		}
+	}
 
 	switch parts[0] {
 	case "lang":
@@ -639,6 +806,57 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 			ParseMode: models.ParseModeHTML,
 		})
 	}
+}
+
+func (h *UserHandlers) handleCaptchaCallback(
+	ctx context.Context,
+	b *bot.Bot,
+	callback *models.CallbackQuery,
+	parts []string,
+	answerCallback func(text string, showAlert bool),
+) {
+	if callback == nil || callback.Message.Message == nil || len(parts) < 3 {
+		return
+	}
+
+	userID := callback.From.ID
+	messageID := callback.Message.Message.ID
+	optionIndex, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return
+	}
+
+	session, ok := h.getCaptchaSession(userID)
+	if !ok || session.SessionID != parts[1] || time.Now().After(session.ExpiresAt) {
+		h.sendCaptchaChallenge(ctx, b, userID, messageID)
+		answerCallback(messages.GetCaptchaExpiredAlert(), true)
+		return
+	}
+
+	if optionIndex != session.CorrectIndex {
+		h.sendCaptchaChallenge(ctx, b, userID, messageID)
+		answerCallback(messages.GetCaptchaWrongAnswerAlert(), true)
+		return
+	}
+
+	if err := h.deps.DB.MarkCaptchaPassed(ctx, userID); err != nil {
+		utils.LogError("mark user captcha passed", err)
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    userID,
+			Text:      messages.GetCaptchaErrorMessage(),
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	h.deps.State.ClearUserState(userID)
+	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    userID,
+		MessageID: messageID,
+	})
+
+	answerCallback(messages.GetCaptchaPassedAlert(), false)
+	h.showStartFlow(ctx, b, userID)
 }
 
 func (h *UserHandlers) maybeOfferHWIDPanel(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) {

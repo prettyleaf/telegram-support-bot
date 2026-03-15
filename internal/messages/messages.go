@@ -368,6 +368,52 @@ func GetLanguageChanged(lang string) string {
 	return "✅ Language changed to English."
 }
 
+// GetCaptchaPromptMessage returns the onboarding captcha text shown before bot usage.
+func GetCaptchaPromptMessage(question string, timeoutSeconds int) string {
+	return fmt.Sprintf(`🛡️ <b>Verification required / Требуется проверка</b>
+
+Before using the bot, please answer one question below.
+Перед использованием бота ответьте на один вопрос ниже.
+
+❓ %s
+
+⏰ %d sec / %d сек`, question, timeoutSeconds, timeoutSeconds)
+}
+
+// GetCaptchaRequiredMessage asks the user to complete the onboarding captcha first.
+func GetCaptchaRequiredMessage() string {
+	return `🛡️ <b>Complete verification first / Сначала пройдите проверку</b>
+
+Use the buttons in the captcha message to continue.
+Нажмите кнопки в сообщении с капчей, чтобы продолжить.`
+}
+
+// GetCaptchaRequiredAlert returns a short callback alert for blocked actions.
+func GetCaptchaRequiredAlert() string {
+	return "Complete verification first / Сначала пройдите проверку"
+}
+
+// GetCaptchaPassedAlert confirms that onboarding verification succeeded.
+func GetCaptchaPassedAlert() string {
+	return "Verification passed / Проверка пройдена"
+}
+
+// GetCaptchaWrongAnswerAlert is shown when the user picks the wrong option.
+func GetCaptchaWrongAnswerAlert() string {
+	return "Wrong answer. Try again / Неверный ответ. Попробуйте ещё раз"
+}
+
+// GetCaptchaExpiredAlert is shown when the current challenge has expired.
+func GetCaptchaExpiredAlert() string {
+	return "Captcha expired. New one sent / Капча истекла. Отправлена новая"
+}
+
+// GetCaptchaErrorMessage is shown when the captcha cannot be generated.
+func GetCaptchaErrorMessage() string {
+	return `⚠️ Failed to start verification. Please try again later.
+⚠️ Не удалось запустить проверку. Попробуйте позже.`
+}
+
 // GetHWIDPromptMessage returns the prompt shown after an HWID-related trigger.
 func GetHWIDPromptMessage(lang string) string {
 	if lang == database.LangRussian {

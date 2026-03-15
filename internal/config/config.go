@@ -12,6 +12,7 @@ import (
 // FSM States for ticket creation
 const (
 	StateNone                 = ""
+	StateWaitingCaptcha       = "waiting_captcha"
 	StateWaitingTicketSubject = "waiting_ticket_subject"
 	StateWaitingTicketMessage = "waiting_ticket_message"
 	StateInTicket             = "in_ticket"
