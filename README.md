@@ -15,6 +15,7 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **Language Selection**: English and Russian user flows
 - **Ticket Stats**: View ticket activity summaries from admin commands
 - **Automatic Ticket Welcome**: Send a configurable first support reply on new tickets
+- **Onboarding Captcha**: Require a verification step on first bot launch, with generated or custom questions
 - **HWID Device Flow**: Detect HWID/device-limit questions, auto-escalate the ticket, and let users remove panel devices with a cooldown
 
 ## Commands
@@ -62,6 +63,18 @@ tickets:
   number_prefix: "TKT"      # Ticket number prefix
   priority_enabled: true
   default_priority: normal
+
+captcha:
+  enabled: true
+  type: custom              # math, button, text, custom
+  timeout_seconds: 120
+  questions:
+    - question: "How much is 2 + 2?"
+      correct_answer: "4"
+      options: ["3", "4", "5", "6"]
+    - question: "Tap the word Support"
+      correct_answer: "Support"
+      options: ["Ticket", "Support", "Panel", "Hello"]
 
 hwid:
   enabled: true
@@ -116,6 +129,8 @@ Located in `internal/database/migrations/`:
 000002_sync_tickets_id_sequence.down.sql
 000003_add_hwid_delete_tracking.up.sql
 000003_add_hwid_delete_tracking.down.sql
+000004_add_user_onboarding.up.sql
+000004_add_user_onboarding.down.sql
 ```
 
 ### Adding New Migrations

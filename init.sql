@@ -96,6 +96,15 @@ CREATE TABLE IF NOT EXISTS ticket_stats (
 
 CREATE INDEX IF NOT EXISTS idx_ticket_stats_date ON ticket_stats(date DESC);
 
+-- User onboarding - stores captcha verification state
+CREATE TABLE IF NOT EXISTS user_onboarding (
+    user_id BIGINT PRIMARY KEY,
+    captcha_passed BOOLEAN NOT NULL DEFAULT FALSE,
+    captcha_passed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- User settings - stores user preferences like language
 CREATE TABLE IF NOT EXISTS user_settings (
     id SERIAL PRIMARY KEY,
@@ -106,4 +115,5 @@ CREATE TABLE IF NOT EXISTS user_settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_onboarding_captcha_passed ON user_onboarding(captcha_passed);
 CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);

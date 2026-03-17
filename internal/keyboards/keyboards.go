@@ -48,6 +48,25 @@ func LanguageSelectionKeyboard() *models.InlineKeyboardMarkup {
 	}
 }
 
+// CaptchaKeyboard creates an inline keyboard for onboarding captcha answers.
+func CaptchaKeyboard(sessionID string, options []string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, (len(options)+1)/2)
+	row := make([]models.InlineKeyboardButton, 0, 2)
+
+	for idx, option := range options {
+		row = append(row, models.InlineKeyboardButton{
+			Text:         option,
+			CallbackData: fmt.Sprintf("captcha:%s:%d", sessionID, idx),
+		})
+		if len(row) == 2 || idx == len(options)-1 {
+			buttons = append(buttons, row)
+			row = make([]models.InlineKeyboardButton, 0, 2)
+		}
+	}
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+}
+
 // TicketActionsKeyboard creates the keyboard for ticket actions (admin)
 func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMarkup {
 	var buttons [][]models.InlineKeyboardButton

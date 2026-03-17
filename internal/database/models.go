@@ -92,6 +92,15 @@ type UserSettings struct {
 	UpdatedAt        time.Time  `db:"updated_at"`
 }
 
+// UserOnboarding represents whether a user passed the onboarding captcha.
+type UserOnboarding struct {
+	UserID          int64      `db:"user_id"`
+	CaptchaPassed   bool       `db:"captcha_passed"`
+	CaptchaPassedAt *time.Time `db:"captcha_passed_at"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+}
+
 // Language constants
 const (
 	LangEnglish = "en"

@@ -134,6 +134,7 @@ func (a *App) createDependencies() *types.Dependencies {
 		DB:               a.DB,
 		State:            a.State,
 		Config:           a.Config,
+		CaptchaService:   services.NewCaptchaService(),
 		TicketService:    services.NewTicketService(a.DB),
 		RemnawaveService: remnawaveService,
 	}

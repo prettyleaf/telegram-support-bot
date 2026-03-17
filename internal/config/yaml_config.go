@@ -12,6 +12,7 @@ import (
 type YAMLConfig struct {
 	Bot       BotConfig       `yaml:"bot"`
 	Tickets   TicketsConfig   `yaml:"tickets"`
+	Captcha   CaptchaConfig   `yaml:"captcha"`
 	HWID      HWIDConfig      `yaml:"hwid"`
 	Messages  MessagesConfig  `yaml:"messages"`
 	Database  DatabaseConfig  `yaml:"database"`
@@ -29,6 +30,19 @@ type TicketsConfig struct {
 	NumberPrefix    string `yaml:"number_prefix"`
 	PriorityEnabled bool   `yaml:"priority_enabled"`
 	DefaultPriority string `yaml:"default_priority"`
+}
+
+type CaptchaConfig struct {
+	Enabled        bool                    `yaml:"enabled"`
+	Type           string                  `yaml:"type"`
+	TimeoutSeconds int                     `yaml:"timeout_seconds"`
+	Questions      []CaptchaQuestionConfig `yaml:"questions"`
+}
+
+type CaptchaQuestionConfig struct {
+	Question      string   `yaml:"question"`
+	CorrectAnswer string   `yaml:"correct_answer"`
+	Options       []string `yaml:"options"`
 }
 
 type HWIDConfig struct {
@@ -96,6 +110,9 @@ func LoadYAMLConfig(path string) (*YAMLConfig, error) {
 	if cfg.Tickets.DefaultPriority == "" {
 		cfg.Tickets.DefaultPriority = PriorityNormal
 	}
+	if cfg.Captcha.TimeoutSeconds == 0 {
+		cfg.Captcha.TimeoutSeconds = 120
+	}
 	if cfg.Database.MaxConnections == 0 {
 		cfg.Database.MaxConnections = 10
 	}
@@ -108,6 +125,7 @@ func LoadYAMLConfig(path string) (*YAMLConfig, error) {
 	if cfg.Thread.NameFormat == "" {
 		cfg.Thread.NameFormat = "#{ticket_number} - {user_name}"
 	}
+	cfg.Captcha = normalizeCaptchaConfig(cfg.Captcha)
 	cfg.HWID.TriggerKeywords = normalizeHWIDKeywords(cfg.HWID.TriggerKeywords)
 	cfg.Thread.IconColor = normalizeThreadIconColor(cfg.Thread.IconColor)
 
@@ -146,6 +164,81 @@ func normalizeHWIDKeywords(values []string) []string {
 		}
 		seen[value] = struct{}{}
 		normalized = append(normalized, value)
+	}
+
+	return normalized
+}
+
+func normalizeCaptchaConfig(cfg CaptchaConfig) CaptchaConfig {
+	cfg.Type = strings.ToLower(strings.TrimSpace(cfg.Type))
+	cfg.Questions = normalizeCaptchaQuestions(cfg.Questions)
+
+	if cfg.Type == "" {
+		if len(cfg.Questions) > 0 {
+			cfg.Type = "custom"
+		} else {
+			cfg.Type = "math"
+		}
+	}
+
+	switch cfg.Type {
+	case "math", "button", "text", "custom":
+	case "question", "questions", "quiz":
+		cfg.Type = "custom"
+	default:
+		cfg.Type = "math"
+	}
+
+	if cfg.TimeoutSeconds <= 0 {
+		cfg.TimeoutSeconds = 120
+	}
+
+	if cfg.Type == "custom" && len(cfg.Questions) == 0 {
+		cfg.Type = "math"
+	}
+
+	return cfg
+}
+
+func normalizeCaptchaQuestions(values []CaptchaQuestionConfig) []CaptchaQuestionConfig {
+	normalized := make([]CaptchaQuestionConfig, 0, len(values))
+
+	for _, value := range values {
+		question := strings.TrimSpace(value.Question)
+		correct := strings.TrimSpace(value.CorrectAnswer)
+		if question == "" || correct == "" {
+			continue
+		}
+
+		options := make([]string, 0, len(value.Options)+1)
+		seen := make(map[string]struct{}, len(value.Options)+1)
+		appendOption := func(option string) {
+			option = strings.TrimSpace(option)
+			if option == "" {
+				return
+			}
+			key := strings.ToLower(option)
+			if _, exists := seen[key]; exists {
+				return
+			}
+			seen[key] = struct{}{}
+			options = append(options, option)
+		}
+
+		for _, option := range value.Options {
+			appendOption(option)
+		}
+		appendOption(correct)
+
+		if len(options) < 2 {
+			continue
+		}
+
+		normalized = append(normalized, CaptchaQuestionConfig{
+			Question:      question,
+			CorrectAnswer: correct,
+			Options:       options,
+		})
 	}
 
 	return normalized
