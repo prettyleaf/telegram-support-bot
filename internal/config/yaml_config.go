@@ -79,6 +79,12 @@ type ThreadConfig struct {
 	IconColor  int    `yaml:"icon_color"`
 }
 
+type yamlDefaultsProbe struct {
+	Tickets struct {
+		NumberPrefix *string `yaml:"number_prefix"`
+	} `yaml:"tickets"`
+}
+
 var forumTopicIconColors = []int{
 	7322096,
 	16766590,
@@ -100,11 +106,16 @@ func LoadYAMLConfig(path string) (*YAMLConfig, error) {
 		return nil, fmt.Errorf("parse config file: %w", err)
 	}
 
+	var probe yamlDefaultsProbe
+	if err := yaml.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parse config defaults probe: %w", err)
+	}
+
 	// Set defaults
 	if cfg.Tickets.MaxOpenPerUser == 0 {
 		cfg.Tickets.MaxOpenPerUser = 3
 	}
-	if cfg.Tickets.NumberPrefix == "" {
+	if probe.Tickets.NumberPrefix == nil {
 		cfg.Tickets.NumberPrefix = "TKT"
 	}
 	if cfg.Tickets.DefaultPriority == "" {
