@@ -11,10 +11,11 @@ import (
 
 // FSM States for ticket creation
 const (
-	StateNone                = ""
+	StateNone                 = ""
+	StateWaitingCaptcha       = "waiting_captcha"
 	StateWaitingTicketSubject = "waiting_ticket_subject"
 	StateWaitingTicketMessage = "waiting_ticket_message"
-	StateInTicket            = "in_ticket"
+	StateInTicket             = "in_ticket"
 )
 
 // Ticket statuses
@@ -34,14 +35,18 @@ const (
 )
 
 type Config struct {
-	BotToken       string
-	AdminIDs       []int64 // Admin IDs from env (can interact with tickets)
-	SupportChatID  int64   // The forum/supergroup chat ID for support threads
-	PostgresUser   string
+	BotToken         string
+	AdminIDs         []int64 // Admin IDs from env (can interact with tickets)
+	SupportChatID    int64   // The forum/supergroup chat ID for support threads
+	PostgresUser     string
 	PostgresPassword string
-	PostgresDB     string
-	PostgresHost   string
-	PostgresPort   string
+	PostgresDB       string
+	PostgresHost     string
+	PostgresPort     string
+	RemnawaveURL     string
+	RemnawaveToken   string
+	RemnawaveMode    string
+	RemnawaveHeaders map[string]string
 }
 
 // Global configuration variables
@@ -111,6 +116,14 @@ func Load() error {
 		return fmt.Errorf("at least one admin ID is required in ADMIN_IDS")
 	}
 
+	Cfg.RemnawaveURL = strings.TrimSpace(os.Getenv("REMNAWAVE_URL"))
+	Cfg.RemnawaveToken = strings.TrimSpace(os.Getenv("REMNAWAVE_TOKEN"))
+	Cfg.RemnawaveMode = strings.ToLower(strings.TrimSpace(os.Getenv("REMNAWAVE_MODE")))
+	if Cfg.RemnawaveMode == "" {
+		Cfg.RemnawaveMode = "remote"
+	}
+	Cfg.RemnawaveHeaders = parseKeyValueEnv(os.Getenv("REMNAWAVE_HEADERS"))
+
 	return nil
 }
 
@@ -130,4 +143,36 @@ func IsAdmin(userID int64) bool {
 		}
 	}
 	return false
+}
+
+// HasRemnawave reports whether the panel integration is configured.
+func (c *Config) HasRemnawave() bool {
+	if c == nil {
+		return false
+	}
+	return c.RemnawaveURL != "" && c.RemnawaveToken != ""
+}
+
+func parseKeyValueEnv(value string) map[string]string {
+	result := make(map[string]string)
+	for _, item := range strings.Split(value, ";") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+
+		parts := strings.SplitN(item, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if key == "" || val == "" {
+			continue
+		}
+
+		result[key] = val
+	}
+	return result
 }

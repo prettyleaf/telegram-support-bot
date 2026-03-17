@@ -8,6 +8,12 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
+// CallbackOption is a small helper for inline keyboards with dynamic callbacks.
+type CallbackOption struct {
+	Text string
+	Data string
+}
+
 // NewTicketKeyboard creates the keyboard for starting a new ticket
 func NewTicketKeyboard() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{
@@ -42,6 +48,25 @@ func LanguageSelectionKeyboard() *models.InlineKeyboardMarkup {
 	}
 }
 
+// CaptchaKeyboard creates an inline keyboard for onboarding captcha answers.
+func CaptchaKeyboard(sessionID string, options []string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, (len(options)+1)/2)
+	row := make([]models.InlineKeyboardButton, 0, 2)
+
+	for idx, option := range options {
+		row = append(row, models.InlineKeyboardButton{
+			Text:         option,
+			CallbackData: fmt.Sprintf("captcha:%s:%d", sessionID, idx),
+		})
+		if len(row) == 2 || idx == len(options)-1 {
+			buttons = append(buttons, row)
+			row = make([]models.InlineKeyboardButton, 0, 2)
+		}
+	}
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+}
+
 // TicketActionsKeyboard creates the keyboard for ticket actions (admin)
 func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMarkup {
 	var buttons [][]models.InlineKeyboardButton
@@ -58,6 +83,7 @@ func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMark
 
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: "📊 View Details", CallbackData: fmt.Sprintf("ticket:info:%d", ticketID)},
+		{Text: "📤 Export", CallbackData: fmt.Sprintf("ticket:export:%d", ticketID)},
 	})
 
 	return &models.InlineKeyboardMarkup{
@@ -84,6 +110,10 @@ func TicketViewKeyboard(ticketID int, isOpen bool, threadID int64) *models.Inlin
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: "🎯 Set Priority", CallbackData: fmt.Sprintf("ticket:priority:%d", ticketID)},
 		{Text: "📝 Notes", CallbackData: fmt.Sprintf("ticket:notes:%d", ticketID)},
+	})
+
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: "📤 Export", CallbackData: fmt.Sprintf("ticket:export:%d", ticketID)},
 	})
 
 	// Third row: Link to topic if thread exists
@@ -123,12 +153,12 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 		if t.Status == "closed" {
 			statusEmoji = "🔴"
 		}
-		
+
 		text := fmt.Sprintf("%s #%s - %s", statusEmoji, t.TicketNumber, t.GetDisplayName())
 		if len(text) > 40 {
 			text = text[:37] + "..."
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("ticket:view:%d", t.ID)},
 		})
@@ -149,7 +179,7 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 			Text: "➡️ Next", CallbackData: fmt.Sprintf("tickets:page:%d:%s", page+1, filter),
 		})
 	}
-	
+
 	if len(navButtons) > 0 {
 		buttons = append(buttons, navButtons)
 	}
@@ -168,7 +198,7 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 		if t.Status == "closed" {
 			statusEmoji = "🔴"
 		}
-		
+
 		text := fmt.Sprintf("%s #%s", statusEmoji, t.TicketNumber)
 		if t.Subject != nil && *t.Subject != "" {
 			subject := *t.Subject
@@ -177,7 +207,7 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 			}
 			text += " - " + subject
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("myticket:view:%d", t.ID)},
 		})
@@ -190,6 +220,55 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
 	}
+}
+
+// HWIDPromptKeyboard asks the user whether they want to manage panel devices.
+func HWIDPromptKeyboard(ticketID int, lang string) *models.InlineKeyboardMarkup {
+	yesText := "✅ Yes"
+	noText := "❌ No"
+	if lang == database.LangRussian {
+		yesText = "✅ Да"
+		noText = "❌ Нет"
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: yesText, CallbackData: fmt.Sprintf("hwid:y:%d", ticketID)},
+				{Text: noText, CallbackData: fmt.Sprintf("hwid:n:%d", ticketID)},
+			},
+		},
+	}
+}
+
+// HWIDUserSelectionKeyboard builds account selection buttons for panel users.
+func HWIDUserSelectionKeyboard(options []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(options)+1)
+	for _, option := range options {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: option.Text, CallbackData: option.Data},
+		})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: refreshLabel, CallbackData: refreshCallback},
+	})
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+}
+
+// HWIDManagementKeyboard builds the device management actions.
+func HWIDManagementKeyboard(deviceButtons []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(deviceButtons)+1)
+	for _, option := range deviceButtons {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: option.Text, CallbackData: option.Data},
+		})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: refreshLabel, CallbackData: refreshCallback},
+	})
+
+	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 }
 
 // ConfirmCloseKeyboard creates confirmation keyboard for closing ticket
@@ -215,7 +294,7 @@ func BannedUsersKeyboard(users []*database.BannedUser) *models.InlineKeyboardMar
 		} else if u.UserName != nil && *u.UserName != "" {
 			displayName = *u.UserName
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: fmt.Sprintf("🚫 %s", displayName), CallbackData: fmt.Sprintf("banned:view:%d", u.UserID)},
 		})
@@ -246,7 +325,7 @@ func CannedResponsesKeyboard(responses []*database.CannedResponse) *models.Inlin
 		if len(text) > 40 {
 			text = text[:37] + "..."
 		}
-		
+
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("canned:use:%s", r.Shortcut)},
 		})

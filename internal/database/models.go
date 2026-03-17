@@ -84,11 +84,21 @@ type TicketStats struct {
 
 // UserSettings represents user preferences
 type UserSettings struct {
-	ID        int       `db:"id"`
-	UserID    int64     `db:"user_id"`
-	Language  string    `db:"language"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID               int        `db:"id"`
+	UserID           int64      `db:"user_id"`
+	Language         string     `db:"language"`
+	LastHWIDDeleteAt *time.Time `db:"last_hwid_delete_at"`
+	CreatedAt        time.Time  `db:"created_at"`
+	UpdatedAt        time.Time  `db:"updated_at"`
+}
+
+// UserOnboarding represents whether a user passed the onboarding captcha.
+type UserOnboarding struct {
+	UserID          int64      `db:"user_id"`
+	CaptchaPassed   bool       `db:"captcha_passed"`
+	CaptchaPassedAt *time.Time `db:"captcha_passed_at"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
 }
 
 // Language constants

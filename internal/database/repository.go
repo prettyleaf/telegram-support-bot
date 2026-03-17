@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -566,6 +567,66 @@ func (r *Repository) HasUserSettings(ctx context.Context, userID int64) (bool, e
 	var exists bool
 	err := pool.QueryRow(ctx, query, userID).Scan(&exists)
 	return exists, err
+}
+
+// HasPassedCaptcha checks whether a user has completed the onboarding captcha.
+func (r *Repository) HasPassedCaptcha(ctx context.Context, userID int64) (bool, error) {
+	query := `SELECT captcha_passed FROM user_onboarding WHERE user_id = $1`
+	var passed bool
+	err := pool.QueryRow(ctx, query, userID).Scan(&passed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return passed, nil
+}
+
+// MarkCaptchaPassed persists a successful onboarding captcha check.
+func (r *Repository) MarkCaptchaPassed(ctx context.Context, userID int64) error {
+	query := `
+		INSERT INTO user_onboarding (user_id, captcha_passed, captcha_passed_at)
+		VALUES ($1, TRUE, NOW())
+		ON CONFLICT (user_id) DO UPDATE SET
+			captcha_passed = TRUE,
+			captcha_passed_at = NOW(),
+			updated_at = NOW()
+	`
+	_, err := pool.Exec(ctx, query, userID)
+	return err
+}
+
+// GetUserLastHWIDDeleteAt returns the timestamp of the last HWID removal action for a user.
+func (r *Repository) GetUserLastHWIDDeleteAt(ctx context.Context, userID int64) (*time.Time, error) {
+	query := `SELECT last_hwid_delete_at FROM user_settings WHERE user_id = $1`
+	var value sql.NullTime
+	err := pool.QueryRow(ctx, query, userID).Scan(&value)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !value.Valid {
+		return nil, nil
+	}
+
+	ts := value.Time
+	return &ts, nil
+}
+
+// SetUserLastHWIDDeleteAt persists the timestamp of the latest HWID removal action.
+func (r *Repository) SetUserLastHWIDDeleteAt(ctx context.Context, userID int64, deletedAt time.Time) error {
+	query := `
+		INSERT INTO user_settings (user_id, language, last_hwid_delete_at)
+		VALUES ($1, 'en', $2)
+		ON CONFLICT (user_id) DO UPDATE SET
+			last_hwid_delete_at = EXCLUDED.last_hwid_delete_at,
+			updated_at = NOW()
+	`
+	_, err := pool.Exec(ctx, query, userID, deletedAt)
+	return err
 }
 
 // Helper functions

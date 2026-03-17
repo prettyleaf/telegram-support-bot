@@ -23,6 +23,54 @@ tickets:
   # Default priority: low, normal, high, urgent
   default_priority: normal
 
+# Onboarding captcha shown before the user can use the bot
+captcha:
+  # Enable captcha on first launch and before other private actions
+  enabled: true
+
+  # Types: math, button, text, custom
+  type: custom
+
+  # How long the current captcha stays valid
+  timeout_seconds: 120
+
+  # Used when type=custom
+  questions:
+    - question: "Сколько будет 2 + 2? / How much is 2 + 2?"
+      correct_answer: "4"
+      options:
+        - "3"
+        - "4"
+        - "5"
+        - "6"
+    - question: "Нажмите на слово Support / Tap the word Support"
+      correct_answer: "Support"
+      options:
+        - "Ticket"
+        - "Support"
+        - "Panel"
+        - "Hello"
+
+# HWID support flow
+hwid:
+  # Enable the automatic HWID/device-management prompt for matching ticket messages
+  enabled: true
+
+  # Users can remove panel devices once per X hours (0 = no cooldown)
+  delete_cooldown_hours: 24
+
+  # Add extra phrases here to widen the trigger filter
+  trigger_keywords:
+    - "hwid"
+    - "хвид"
+    - "удалить устройство"
+    - "удаление устройства"
+    - "лимит устройств"
+    - "лимит устройства"
+    - "delete device"
+    - "remove device"
+    - "device limit"
+
 # Message overrides (optional)
 messages:
   # Automated support reply sent immediately after a new ticket is opened

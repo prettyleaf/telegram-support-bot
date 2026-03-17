@@ -122,12 +122,21 @@ func New(ctx context.Context) (*App, error) {
 
 // createDependencies creates and initializes all service dependencies.
 func (a *App) createDependencies() *types.Dependencies {
+	remnawaveService := services.NewRemnawaveService(a.Config)
+	if remnawaveService != nil {
+		utils.LogSystem("Remnawave panel integration enabled")
+	} else if a.Config != nil && (a.Config.RemnawaveURL != "" || a.Config.RemnawaveToken != "") {
+		utils.Logger.Warn("Remnawave panel integration is partially configured and will stay disabled")
+	}
+
 	return &types.Dependencies{
-		Bot:           a.Bot,
-		DB:            a.DB,
-		State:         a.State,
-		Config:        a.Config,
-		TicketService: services.NewTicketService(a.DB),
+		Bot:              a.Bot,
+		DB:               a.DB,
+		State:            a.State,
+		Config:           a.Config,
+		CaptchaService:   services.NewCaptchaService(),
+		TicketService:    services.NewTicketService(a.DB),
+		RemnawaveService: remnawaveService,
 	}
 }
 
@@ -234,7 +243,7 @@ func (a *App) handleMessage(ctx context.Context, b *bot.Bot, update *models.Upda
 // Start starts the application.
 func (a *App) Start() error {
 	utils.LogSystem("Bot is starting...")
-	
+
 	// Get bot info
 	me, err := a.Bot.GetMe(a.ctx)
 	if err != nil {

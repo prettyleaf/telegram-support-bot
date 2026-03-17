@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -1246,6 +1247,17 @@ func (h *AdminHandlers) handleTicketCallback(ctx context.Context, b *bot.Bot, ca
 			Text:            fmt.Sprintf("💬 <a href=\"https://t.me/c/%s/%d\">Go to ticket #%s topic</a>", internalChatID, ticket.ThreadID, ticket.TicketNumber),
 			ParseMode:       models.ParseModeHTML,
 		})
+
+	case "export":
+		if err := h.exportTicketHistory(ctx, b, ticket, chatID, threadID); err != nil {
+			utils.LogError("export ticket history", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:          chatID,
+				MessageThreadID: threadID,
+				Text:            fmt.Sprintf("⚠️ Failed to export ticket #%s.", ticket.TicketNumber),
+				ParseMode:       models.ParseModeHTML,
+			})
+		}
 	}
 }
 
@@ -1495,6 +1507,135 @@ func (h *AdminHandlers) sendCannedResponseToTicket(ctx context.Context, b *bot.B
 	}
 
 	return h.deps.TicketService.SaveMessage(ctx, ticketMessage)
+}
+
+func (h *AdminHandlers) exportTicketHistory(ctx context.Context, b *bot.Bot, ticket *database.Ticket, chatID int64, threadID int) error {
+	messages, err := h.deps.TicketService.GetTicketMessages(ctx, ticket.ID)
+	if err != nil {
+		return fmt.Errorf("get ticket messages: %w", err)
+	}
+
+	fileName := formatTicketExportFileName(ticket.TicketNumber)
+	document := &models.InputFileUpload{
+		Filename: fileName,
+		Data:     bytes.NewReader([]byte(buildTicketHistoryHTML(ticket, messages))),
+	}
+
+	_, err = b.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:              chatID,
+		MessageThreadID:     threadID,
+		Document:            document,
+		Caption:             fmt.Sprintf("📤 Ticket #%s history export", ticket.TicketNumber),
+		DisableNotification: true,
+	})
+	if err != nil {
+		return fmt.Errorf("send export document: %w", err)
+	}
+
+	return nil
+}
+
+func buildTicketHistoryHTML(ticket *database.Ticket, messages []*database.TicketMessage) string {
+	var sb strings.Builder
+
+	sb.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\">")
+	sb.WriteString("<title>Ticket History</title>")
+	sb.WriteString("<style>")
+	sb.WriteString("body{font-family:Arial,sans-serif;background:#f5f5f5;color:#222;margin:24px;}")
+	sb.WriteString(".meta,.message{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:12px;}")
+	sb.WriteString(".role{font-weight:bold;margin-bottom:6px;}")
+	sb.WriteString(".time{color:#666;font-size:12px;margin-bottom:8px;}")
+	sb.WriteString(".text{white-space:pre-wrap;}")
+	sb.WriteString(".tag{display:inline-block;background:#eef3ff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px;}")
+	sb.WriteString("</style></head><body>")
+
+	sb.WriteString("<div class=\"meta\">")
+	sb.WriteString(fmt.Sprintf("<h1>Ticket #%s</h1>", utils.EscapeHTML(ticket.TicketNumber)))
+	sb.WriteString(fmt.Sprintf("<div><b>Status:</b> %s</div>", utils.EscapeHTML(ticket.Status)))
+	sb.WriteString(fmt.Sprintf("<div><b>Priority:</b> %s</div>", utils.EscapeHTML(ticket.Priority)))
+	sb.WriteString(fmt.Sprintf("<div><b>User:</b> %s</div>", utils.EscapeHTML(ticket.GetDisplayName())))
+	sb.WriteString(fmt.Sprintf("<div><b>User ID:</b> %d</div>", ticket.UserID))
+	sb.WriteString(fmt.Sprintf("<div><b>Created:</b> %s</div>", ticket.CreatedAt.Format("2006-01-02 15:04:05 MST")))
+	if ticket.ClosedAt != nil {
+		sb.WriteString(fmt.Sprintf("<div><b>Closed:</b> %s</div>", ticket.ClosedAt.Format("2006-01-02 15:04:05 MST")))
+	}
+	if ticket.Subject != nil && *ticket.Subject != "" {
+		sb.WriteString(fmt.Sprintf("<div><b>Subject:</b> %s</div>", utils.EscapeHTML(*ticket.Subject)))
+	}
+	sb.WriteString(fmt.Sprintf("<div><b>Messages:</b> %d</div>", len(messages)))
+	sb.WriteString("</div>")
+
+	for idx, msg := range messages {
+		role := "User"
+		if msg.IsAdmin {
+			role = "Support"
+		}
+		text := ""
+		if msg.MessageText != nil {
+			text = utils.EscapeHTML(*msg.MessageText)
+		}
+		if text == "" {
+			text = "<i>[no text]</i>"
+		}
+
+		sb.WriteString("<div class=\"message\">")
+		sb.WriteString(fmt.Sprintf("<div class=\"role\">%d. %s%s</div>", idx+1, utils.EscapeHTML(exportSenderName(msg)), exportMediaTag(msg)))
+		sb.WriteString(fmt.Sprintf("<div class=\"time\">%s | %s</div>", msg.CreatedAt.Format("2006-01-02 15:04:05 MST"), role))
+		sb.WriteString(fmt.Sprintf("<div class=\"text\">%s</div>", text))
+		sb.WriteString("</div>")
+	}
+
+	sb.WriteString("</body></html>")
+	return sb.String()
+}
+
+func exportSenderName(msg *database.TicketMessage) string {
+	if msg == nil {
+		return "Unknown"
+	}
+	if msg.SenderUsername != nil && *msg.SenderUsername != "" {
+		return "@" + *msg.SenderUsername
+	}
+	if msg.SenderName != nil && *msg.SenderName != "" {
+		return *msg.SenderName
+	}
+	if msg.IsAdmin {
+		return "Support"
+	}
+	return "User"
+}
+
+func exportMediaTag(msg *database.TicketMessage) string {
+	if msg == nil || !msg.HasMedia {
+		return ""
+	}
+
+	label := "attachment"
+	if msg.MediaType != nil && *msg.MediaType != "" {
+		label = *msg.MediaType
+	}
+	return fmt.Sprintf("<span class=\"tag\">%s</span>", utils.EscapeHTML(label))
+}
+
+func formatTicketExportFileName(ticketNumber string) string {
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, ticketNumber)
+	if safe == "" {
+		safe = "ticket"
+	}
+	return fmt.Sprintf("ticket-%s-history.html", safe)
 }
 
 func parseTicketListArgs(text string) (int, string) {
