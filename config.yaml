@@ -15,7 +15,7 @@ tickets:
   max_open_per_user: 3
   
   # Ticket number prefix
-  number_prefix: "TKT"
+  number_prefix: ""
   
   # Enable ticket priority
   priority_enabled: true
@@ -29,7 +29,7 @@ captcha:
   enabled: true
 
   # Types: math, button, text, custom
-  type: custom
+  type: math
 
   # How long the current captcha stays valid
   timeout_seconds: 120
