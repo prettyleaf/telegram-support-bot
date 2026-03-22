@@ -9,10 +9,10 @@ bot:
 # Ticket settings
 tickets:
   # Auto-close inactive tickets after X hours (0 = disabled)
-  auto_close_hours: 0
+  auto_close_hours: 24
   
   # Maximum open tickets per user
-  max_open_per_user: 3
+  max_open_per_user: 1
   
   # Ticket number prefix
   number_prefix: ""
@@ -70,6 +70,10 @@ hwid:
     - "delete device"
     - "remove device"
     - "device limit"
+    - "отвязать устройство"
+    - "отвязать 1 устройство"
+    - "выгнать устройство"
+    - "выгнать 1 устройство"
 
 # Message overrides (optional)
 messages:

@@ -38,6 +38,7 @@ type Config struct {
 	BotToken         string
 	AdminIDs         []int64 // Admin IDs from env (can interact with tickets)
 	SupportChatID    int64   // The forum/supergroup chat ID for support threads
+	HWIDDeleteLogThreadID int
 	PostgresUser     string
 	PostgresPassword string
 	PostgresDB       string
@@ -93,6 +94,12 @@ func Load() error {
 	}
 	Cfg.SupportChatID = supportChatID
 
+	hwidDeleteLogThreadID, err := getOptionalIntEnv("HWID_DELETE_LOG_THREAD_ID")
+	if err != nil {
+		return err
+	}
+	Cfg.HWIDDeleteLogThreadID = hwidDeleteLogThreadID
+
 	// Parse ADMIN_IDS (comma-separated list of admin user IDs)
 	adminIDsStr := os.Getenv("ADMIN_IDS")
 	if adminIDsStr == "" {
@@ -133,6 +140,20 @@ func getRequiredEnv(key string) (string, error) {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
 	return value, nil
+}
+
+func getOptionalIntEnv(key string) (int, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return 0, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid number: %w", key, err)
+	}
+
+	return parsed, nil
 }
 
 // IsAdmin checks if a user ID is in the admin list

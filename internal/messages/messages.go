@@ -31,7 +31,8 @@ func GetWelcomeMessageLang(lang string) string {
 <b>Команды:</b>
 /start - Запустить бота
 /newticket - Создать новый тикет
-/mytickets - Посмотреть ваши тикеты
+/mytickets - Посмотреть и закрыть ваши тикеты
+/devices - Открыть список устройств
 /cancel - Отменить текущую операцию
 /language - Сменить язык`
 	}
@@ -47,7 +48,8 @@ Our team will respond as soon as possible.
 <b>Commands:</b>
 /start - Start the bot
 /newticket - Create a new ticket
-/mytickets - View your tickets
+/mytickets - View and close your tickets
+/devices - Open device list
 /cancel - Cancel current operation
 /language - Change language`
 }
@@ -257,6 +259,22 @@ func FormatTicketDetailsForUser(t *database.Ticket) string {
 	return formatTicketDetails(t, false)
 }
 
+// GetUserCloseTicketConfirmationMessage asks the user to confirm closing their ticket.
+func GetUserCloseTicketConfirmationMessage(ticketNumber, lang string) string {
+	if lang == database.LangRussian {
+		return fmt.Sprintf("🔒 <b>Закрыть тикет #%s?</b>\n\nВы сможете открыть новый тикет позже, если понадобится помощь.", utils.EscapeHTML(ticketNumber))
+	}
+	return fmt.Sprintf("🔒 <b>Close ticket #%s?</b>\n\nYou can open a new ticket later if you need more help.", utils.EscapeHTML(ticketNumber))
+}
+
+// GetUserCloseTicketErrorMessage returns a generic close-ticket error for users.
+func GetUserCloseTicketErrorMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "❌ Не удалось закрыть тикет."
+	}
+	return "❌ Failed to close ticket."
+}
+
 func formatTicketDetails(t *database.Ticket, includeCloser bool) string {
 	var sb strings.Builder
 
@@ -422,10 +440,50 @@ func GetHWIDPromptMessage(lang string) string {
 	return "🧩 <b>Your message looks related to HWID or connected devices.</b>\n\nDo you want to manage your connected devices directly in the panel?"
 }
 
+// GetHWIDShortcutLoadingMessage returns the loading text for direct device list access.
+func GetHWIDShortcutLoadingMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⏳ <b>Загружаю список устройств...</b>"
+	}
+	return "⏳ <b>Loading your device list...</b>"
+}
+
+// GetHWIDFeatureUnavailableMessage returns the message for unavailable device management.
+func GetHWIDFeatureUnavailableMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Управление устройствами сейчас недоступно."
+	}
+	return "⚠️ Device management is currently unavailable."
+}
+
+// GetHWIDStandalonePanelErrorMessage returns a generic panel error without ticket wording.
+func GetHWIDStandalonePanelErrorMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Не удалось открыть управление устройствами."
+	}
+	return "⚠️ Failed to open device management."
+}
+
+// GetHWIDStandaloneNoPanelUsersMessage returns the standalone response when no panel profile is found.
+func GetHWIDStandaloneNoPanelUsersMessage(lang string) string {
+	if lang == database.LangRussian {
+		return "⚠️ Я не нашёл профиль, связанный с вашим Telegram ID."
+	}
+	return "⚠️ I couldn't find a panel profile linked to your Telegram ID."
+}
+
+// GetHWIDTicketCreatedMessage returns the shortcut-specific ticket creation message.
+func GetHWIDTicketCreatedMessage(ticketNumber, lang string) string {
+	if lang == database.LangRussian {
+		return fmt.Sprintf("✅ <b>Тикет #%s создан для управления устройствами.</b>", utils.EscapeHTML(ticketNumber))
+	}
+	return fmt.Sprintf("✅ <b>Ticket #%s was created for device management.</b>", utils.EscapeHTML(ticketNumber))
+}
+
 // GetHWIDUserSelectionMessage asks the user to choose a panel account.
 func GetHWIDUserSelectionMessage(lang string) string {
 	if lang == database.LangRussian {
-		return "👤 <b>Найдено несколько профилей панели.</b>\n\nВыберите, для какого профиля показать управление подключёнными устройствами."
+		return "👤 <b>Найдено несколько профилей.</b>\n\nВыберите, для какого профиля показать управление подключёнными устройствами."
 	}
 	return "👤 <b>Multiple panel users were found.</b>\n\nChoose which panel profile should be used for device management."
 }
@@ -441,7 +499,7 @@ func GetHWIDPanelErrorMessage(lang string) string {
 // GetHWIDNoPanelUsersMessage returns the response when no panel profile is found for a Telegram user.
 func GetHWIDNoPanelUsersMessage(lang string) string {
 	if lang == database.LangRussian {
-		return "⚠️ Я не нашёл профиль панели, связанный с вашим Telegram ID. Тикет уже поднят по приоритету, администраторы это увидят."
+		return "⚠️ Я не нашёл профиль, связанный с вашим Telegram ID. Тикет уже поднят по приоритету, администраторы это увидят."
 	}
 	return "⚠️ I couldn't find a panel profile linked to your Telegram ID. The ticket has already been escalated for admins."
 }

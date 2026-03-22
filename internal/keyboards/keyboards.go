@@ -21,6 +21,12 @@ func NewTicketKeyboard() *models.InlineKeyboardMarkup {
 			{
 				{Text: "📝 Create New Ticket", CallbackData: "ticket:create"},
 			},
+			{
+				{Text: "🎫 My Tickets", CallbackData: "menu:mytickets"},
+			},
+			{
+				{Text: "📱 Devices", CallbackData: "hwid:menu:main"},
+			},
 		},
 	}
 }
@@ -31,6 +37,12 @@ func NewTicketKeyboardRu() *models.InlineKeyboardMarkup {
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
 				{Text: "📝 Создать тикет", CallbackData: "ticket:create"},
+			},
+			{
+				{Text: "🎫 Мои тикеты", CallbackData: "menu:mytickets"},
+			},
+			{
+				{Text: "📱 Устройства", CallbackData: "hwid:menu:main"},
 			},
 		},
 	}
@@ -88,6 +100,17 @@ func TicketActionsKeyboard(ticketID int, isOpen bool) *models.InlineKeyboardMark
 
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
+	}
+}
+
+// TicketReopenKeyboard creates a compact keyboard with a reopen action.
+func TicketReopenKeyboard(ticketID int) *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "🔓 Reopen Ticket", CallbackData: fmt.Sprintf("ticket:reopen:%d", ticketID)},
+			},
+		},
 	}
 }
 
@@ -190,8 +213,16 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 }
 
 // UserTicketListKeyboard creates the keyboard for user's ticket list
-func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMarkup {
+func UserTicketListKeyboard(tickets []*database.Ticket, lang string) *models.InlineKeyboardMarkup {
 	var buttons [][]models.InlineKeyboardButton
+	createTicketText := "📝 Create New Ticket"
+	devicesText := "📱 Devices"
+	backText := "⬅️ Main menu"
+	if lang == database.LangRussian {
+		createTicketText = "📝 Создать тикет"
+		devicesText = "📱 Устройства"
+		backText = "⬅️ Главное меню"
+	}
 
 	for _, t := range tickets {
 		statusEmoji := "🟢"
@@ -214,11 +245,61 @@ func UserTicketListKeyboard(tickets []*database.Ticket) *models.InlineKeyboardMa
 	}
 
 	buttons = append(buttons, []models.InlineKeyboardButton{
-		{Text: "📝 Create New Ticket", CallbackData: "ticket:create"},
+		{Text: createTicketText, CallbackData: "ticket:create"},
+		{Text: devicesText, CallbackData: "hwid:menu:list"},
+	})
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: backText, CallbackData: "menu:main"},
 	})
 
 	return &models.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
+	}
+}
+
+// UserTicketDetailsKeyboard creates actions for a user's ticket details view.
+func UserTicketDetailsKeyboard(ticketID int, isOpen bool, lang string) *models.InlineKeyboardMarkup {
+	closeText := "🔒 Close Ticket"
+	backText := "⬅️ Back"
+	mainMenuText := "🏠 Main menu"
+	if lang == database.LangRussian {
+		closeText = "🔒 Закрыть тикет"
+		backText = "⬅️ Назад"
+		mainMenuText = "🏠 Главное меню"
+	}
+
+	buttons := make([][]models.InlineKeyboardButton, 0, 2)
+	if isOpen {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: closeText, CallbackData: fmt.Sprintf("myticket:close:%d", ticketID)},
+		})
+	}
+	buttons = append(buttons, []models.InlineKeyboardButton{
+		{Text: backText, CallbackData: "menu:mytickets"},
+		{Text: mainMenuText, CallbackData: "menu:main"},
+	})
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
+}
+
+// UserCloseTicketConfirmKeyboard creates confirmation actions for a user closing a ticket.
+func UserCloseTicketConfirmKeyboard(ticketID int, lang string) *models.InlineKeyboardMarkup {
+	confirmText := "✅ Yes, Close"
+	cancelText := "❌ Cancel"
+	if lang == database.LangRussian {
+		confirmText = "✅ Да, закрыть"
+		cancelText = "❌ Отмена"
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: confirmText, CallbackData: fmt.Sprintf("myticket:confirmclose:%d", ticketID)},
+				{Text: cancelText, CallbackData: fmt.Sprintf("myticket:cancelclose:%d", ticketID)},
+			},
+		},
 	}
 }
 
@@ -242,8 +323,8 @@ func HWIDPromptKeyboard(ticketID int, lang string) *models.InlineKeyboardMarkup 
 }
 
 // HWIDUserSelectionKeyboard builds account selection buttons for panel users.
-func HWIDUserSelectionKeyboard(options []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
-	buttons := make([][]models.InlineKeyboardButton, 0, len(options)+1)
+func HWIDUserSelectionKeyboard(options []CallbackOption, refreshLabel, refreshCallback, backLabel, backCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(options)+2)
 	for _, option := range options {
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: option.Text, CallbackData: option.Data},
@@ -252,13 +333,18 @@ func HWIDUserSelectionKeyboard(options []CallbackOption, refreshLabel, refreshCa
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: refreshLabel, CallbackData: refreshCallback},
 	})
+	if backLabel != "" && backCallback != "" {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: backLabel, CallbackData: backCallback},
+		})
+	}
 
 	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 }
 
 // HWIDManagementKeyboard builds the device management actions.
-func HWIDManagementKeyboard(deviceButtons []CallbackOption, refreshLabel, refreshCallback string) *models.InlineKeyboardMarkup {
-	buttons := make([][]models.InlineKeyboardButton, 0, len(deviceButtons)+1)
+func HWIDManagementKeyboard(deviceButtons []CallbackOption, refreshLabel, refreshCallback, backLabel, backCallback string) *models.InlineKeyboardMarkup {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(deviceButtons)+2)
 	for _, option := range deviceButtons {
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: option.Text, CallbackData: option.Data},
@@ -267,6 +353,11 @@ func HWIDManagementKeyboard(deviceButtons []CallbackOption, refreshLabel, refres
 	buttons = append(buttons, []models.InlineKeyboardButton{
 		{Text: refreshLabel, CallbackData: refreshCallback},
 	})
+	if backLabel != "" && backCallback != "" {
+		buttons = append(buttons, []models.InlineKeyboardButton{
+			{Text: backLabel, CallbackData: backCallback},
+		})
+	}
 
 	return &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 }
