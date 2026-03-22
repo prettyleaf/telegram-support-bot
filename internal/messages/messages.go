@@ -194,7 +194,7 @@ func FormatUserTicketListLang(tickets []*database.Ticket, lang string) string {
 		statusEmoji := getStatusEmoji(t.Status)
 		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", statusEmoji, t.TicketNumber, t.Status))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -215,7 +215,7 @@ func FormatAdminTicketList(tickets []*database.Ticket) string {
 		priorityEmoji := getPriorityEmoji(t.Priority)
 		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", priorityEmoji, t.TicketNumber, utils.EscapeHTML(t.GetDisplayName())))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -241,7 +241,7 @@ func FormatAllTicketList(tickets []*database.Ticket, page, totalPages int) strin
 		}
 		sb.WriteString("\n")
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -569,11 +569,4 @@ func getPriorityEmoji(priority string) string {
 	default:
 		return "⚪"
 	}
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

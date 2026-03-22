@@ -540,9 +540,7 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 	subject := ""
 	if message.Text != "" {
 		subject = message.Text
-		if len(subject) > 100 {
-			subject = subject[:97] + "..."
-		}
+		subject = utils.TruncateString(subject, 100)
 	}
 
 	ticket, err = h.deps.TicketService.CreateTicket(ctx, b, userID, userName, userUsername, subject)
@@ -1853,10 +1851,7 @@ func buildHWIDCooldownLine(duration time.Duration, lang string) string {
 
 func truncateDeviceButtonLabel(device services.RemnawaveDevice, lang string) string {
 	label := formatDeviceLine(device, lang)
-	if len(label) <= 28 {
-		return label
-	}
-	return label[:25] + "..."
+	return utils.TruncateString(label, 28)
 }
 
 func valueOrEmpty(value *string) string {

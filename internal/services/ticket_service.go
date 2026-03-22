@@ -92,9 +92,7 @@ func (s *TicketService) CreateTicket(ctx context.Context, b *bot.Bot, userID int
 	topicName = strings.ReplaceAll(topicName, "{user_name}", displayName)
 
 	// Truncate topic name if too long (Telegram limit is 128 characters)
-	if len(topicName) > 128 {
-		topicName = topicName[:125] + "..."
-	}
+	topicName = utils.TruncateString(topicName, 128)
 
 	// Create forum topic in support chat
 	topic, err := b.CreateForumTopic(ctx, &bot.CreateForumTopicParams{
@@ -270,9 +268,7 @@ func (s *TicketService) RecreateTopicForTicket(ctx context.Context, b *bot.Bot, 
 	topicName = strings.ReplaceAll(topicName, "{user_name}", displayName)
 
 	// Truncate topic name if too long (Telegram limit is 128 characters)
-	if len(topicName) > 128 {
-		topicName = topicName[:125] + "..."
-	}
+	topicName = utils.TruncateString(topicName, 128)
 
 	// Create forum topic in support chat
 	topic, err := b.CreateForumTopic(ctx, &bot.CreateForumTopicParams{
