@@ -34,6 +34,10 @@ type captchaSessionState struct {
 	MessageID    int
 }
 
+const (
+	hwidEntrySourceMainMenu = "main"
+)
+
 // NewUserHandlers creates a new user handlers instance
 func NewUserHandlers(deps *types.Dependencies) *UserHandlers {
 	return &UserHandlers{deps: deps}
@@ -119,6 +123,7 @@ func (h *UserHandlers) showStartFlow(ctx context.Context, b *bot.Bot, userID int
 	}
 
 	lang := h.getUserLanguage(ctx, userID)
+	keyboard := buildUserMainMenuKeyboard(lang)
 
 	// Check if user has an open ticket
 	ticket, err := h.deps.TicketService.GetOpenTicketByUserID(ctx, userID)
@@ -141,22 +146,16 @@ Just send your message and our support team will receive it.`,
 				messages.GetWelcomeMessageLang(lang), ticket.TicketNumber)
 		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    userID,
-			Text:      text,
-			ParseMode: models.ParseModeHTML,
+			ChatID:      userID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboard,
 		})
 		h.deps.State.SetUserState(userID, config.StateInTicket)
 		h.deps.State.SetUserData(userID, "ticket_id", ticket.ID)
 		return
 	}
 
-	// Send welcome message
-	var keyboard *models.InlineKeyboardMarkup
-	if lang == "ru" {
-		keyboard = keyboards.NewTicketKeyboardRu()
-	} else {
-		keyboard = keyboards.NewTicketKeyboard()
-	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      userID,
 		Text:        messages.GetWelcomeMessageLang(lang),
@@ -372,7 +371,10 @@ func (h *UserHandlers) HandleMyTickets(ctx context.Context, b *bot.Bot, update *
 	}
 
 	lang := h.getUserLanguage(ctx, userID)
+	h.sendUserTicketsList(ctx, b, userID, lang)
+}
 
+func (h *UserHandlers) sendUserTicketsList(ctx context.Context, b *bot.Bot, userID int64, lang string) {
 	tickets, err := h.deps.TicketService.GetTicketsByUserID(ctx, userID, 10)
 	if err != nil {
 		utils.LogError("get user tickets", err)
@@ -394,8 +396,54 @@ func (h *UserHandlers) HandleMyTickets(ctx context.Context, b *bot.Bot, update *
 		ChatID:      userID,
 		Text:        messages.FormatUserTicketListLang(tickets, lang),
 		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: keyboards.UserTicketListKeyboard(tickets),
+		ReplyMarkup: keyboards.UserTicketListKeyboard(tickets, lang),
 	})
+}
+
+func (h *UserHandlers) renderUserTicketsList(ctx context.Context, b *bot.Bot, chatID int64, messageID int, userID int64, lang string) {
+	tickets, err := h.deps.TicketService.GetTicketsByUserID(ctx, userID, 10)
+	if err != nil {
+		utils.LogError("get user tickets", err)
+		var errorMsg string
+		if lang == database.LangRussian {
+			errorMsg = "❌ Не удалось загрузить ваши тикеты. Пожалуйста, попробуйте позже."
+		} else {
+			errorMsg = "❌ Failed to load your tickets. Please try again later."
+		}
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Text:      errorMsg,
+			ParseMode: models.ParseModeHTML,
+		})
+		return
+	}
+
+	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		Text:        messages.FormatUserTicketListLang(tickets, lang),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.UserTicketListKeyboard(tickets, lang),
+	})
+	if err != nil {
+		utils.LogError("edit user ticket list", err)
+	}
+}
+
+// HandleDevices handles the /devices command.
+func (h *UserHandlers) HandleDevices(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if update.Message == nil || update.Message.From == nil {
+		return
+	}
+
+	userID := update.Message.From.ID
+	if !h.ensureUserPassedCaptcha(ctx, b, userID) {
+		return
+	}
+
+	lang := h.getUserLanguage(ctx, userID)
+	h.openHWIDShortcut(ctx, b, update.Message.From, lang, 0, "")
 }
 
 // HandleCancel handles the /cancel command
@@ -702,6 +750,26 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 			ReplyMarkup: keyboard,
 		})
 
+	case "menu":
+		if len(parts) < 2 {
+			return
+		}
+		lang := h.getUserLanguage(ctx, userID)
+		switch parts[1] {
+		case "mytickets":
+			if callback.Message.Message != nil {
+				h.renderUserTicketsList(ctx, b, userID, callback.Message.Message.ID, userID, lang)
+				return
+			}
+			h.sendUserTicketsList(ctx, b, userID, lang)
+		case "main":
+			if callback.Message.Message != nil {
+				h.renderUserMainMenu(ctx, b, userID, callback.Message.Message.ID, lang)
+				return
+			}
+			h.showStartFlow(ctx, b, userID)
+		}
+
 	case "ticket":
 		if len(parts) < 2 {
 			return
@@ -771,27 +839,51 @@ func (h *UserHandlers) HandleUserCallback(ctx context.Context, b *bot.Bot, updat
 		if len(parts) < 3 {
 			return
 		}
-		if parts[1] == "view" {
-			ticketID, err := strconv.Atoi(parts[2])
-			if err != nil {
+		lang := h.getUserLanguage(ctx, userID)
+		ticketID, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return
+		}
+
+		ticket, err := h.deps.TicketService.GetTicketByID(ctx, ticketID)
+		if err != nil || ticket == nil {
+			return
+		}
+
+		// Verify ownership
+		if ticket.UserID != userID {
+			return
+		}
+
+		switch parts[1] {
+		case "view":
+			if callback.Message.Message != nil {
+				h.renderUserTicketDetails(ctx, b, userID, callback.Message.Message.ID, ticket, lang)
 				return
 			}
+			h.sendUserTicketDetails(ctx, b, userID, ticket, lang)
 
-			ticket, err := h.deps.TicketService.GetTicketByID(ctx, ticketID)
-			if err != nil || ticket == nil {
+		case "close":
+			if callback.Message.Message == nil {
 				return
 			}
-
-			// Verify ownership
-			if ticket.UserID != userID {
+			if !ticket.IsOpen() {
+				h.renderUserTicketDetails(ctx, b, userID, callback.Message.Message.ID, ticket, lang)
 				return
 			}
+			h.renderUserCloseTicketConfirmation(ctx, b, userID, callback.Message.Message.ID, ticket, lang)
 
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:    userID,
-				Text:      messages.FormatTicketDetailsForUser(ticket),
-				ParseMode: models.ParseModeHTML,
-			})
+		case "confirmclose":
+			if callback.Message.Message == nil {
+				return
+			}
+			h.closeUserTicket(ctx, b, &callback.From, callback.Message.Message.ID, ticket, lang)
+
+		case "cancelclose":
+			if callback.Message.Message == nil {
+				return
+			}
+			h.renderUserTicketDetails(ctx, b, userID, callback.Message.Message.ID, ticket, lang)
 		}
 
 	case "hwid":
@@ -889,13 +981,37 @@ func (h *UserHandlers) maybeOfferHWIDPanel(ctx context.Context, b *bot.Bot, tick
 }
 
 func (h *UserHandlers) handleHWIDCallback(ctx context.Context, b *bot.Bot, callback *models.CallbackQuery, parts []string) {
-	if callback == nil || callback.Message.Message == nil || len(parts) < 3 {
+	if callback == nil || callback.Message.Message == nil || len(parts) < 2 {
 		return
 	}
 
 	userID := callback.From.ID
 	lang := h.getUserLanguage(ctx, userID)
 	msg := callback.Message.Message
+
+	if parts[1] == "menu" {
+		source := ""
+		if len(parts) > 2 {
+			source = parts[2]
+		}
+		h.openHWIDShortcut(ctx, b, &callback.From, lang, msg.ID, source)
+		return
+	}
+
+	if parts[1] == "back" {
+		source := ""
+		if len(parts) > 2 {
+			source = parts[2]
+		}
+		if source == hwidEntrySourceMainMenu {
+			h.renderUserMainMenu(ctx, b, userID, msg.ID, lang)
+		}
+		return
+	}
+
+	if len(parts) < 3 {
+		return
+	}
 
 	ticketID, err := strconv.Atoi(parts[2])
 	if err != nil {
@@ -912,7 +1028,7 @@ func (h *UserHandlers) handleHWIDCallback(ctx context.Context, b *bot.Bot, callb
 		}
 
 		priorityText := h.raiseHWIDTicketPriority(ctx, b, ticket, lang)
-		h.openHWIDPanel(ctx, b, ticket, msg.ID, lang, priorityText)
+		h.openHWIDPanel(ctx, b, ticket, msg.ID, lang, priorityText, "")
 
 	case "n":
 		h.clearHWIDPromptState(userID)
@@ -925,46 +1041,259 @@ func (h *UserHandlers) handleHWIDCallback(ctx context.Context, b *bot.Bot, callb
 		if len(parts) < 4 {
 			return
 		}
+		source := ""
+		if len(parts) > 4 {
+			source = parts[4]
+		}
+		if ticketID == 0 && source == hwidEntrySourceMainMenu {
+			h.renderStandaloneHWIDManagement(ctx, b, &callback.From, msg.ID, lang, "", parts[3], source)
+			return
+		}
 		ticket, err := h.getOwnedTicket(ctx, userID, ticketID)
 		if err != nil {
 			h.renderHWIDText(ctx, b, userID, msg.ID, messages.GetHWIDTicketUnavailableMessage(lang))
 			return
 		}
-		h.renderHWIDManagement(ctx, b, ticket, msg.ID, lang, "", parts[3])
+		h.renderHWIDManagement(ctx, b, ticket, msg.ID, lang, "", parts[3], source)
 
 	case "ru":
+		source := ""
+		if len(parts) > 3 {
+			source = parts[3]
+		}
+		if ticketID == 0 && source == hwidEntrySourceMainMenu {
+			h.openStandaloneHWIDPanel(ctx, b, &callback.From, msg.ID, lang, "", source)
+			return
+		}
 		ticket, err := h.getOwnedTicket(ctx, userID, ticketID)
 		if err != nil {
 			h.renderHWIDText(ctx, b, userID, msg.ID, messages.GetHWIDTicketUnavailableMessage(lang))
 			return
 		}
-		h.openHWIDPanel(ctx, b, ticket, msg.ID, lang, "")
+		h.openHWIDPanel(ctx, b, ticket, msg.ID, lang, "", source)
 
 	case "r":
 		if len(parts) < 4 {
 			return
 		}
+		source := ""
+		if len(parts) > 4 {
+			source = parts[4]
+		}
+		if ticketID == 0 && source == hwidEntrySourceMainMenu {
+			h.renderStandaloneHWIDManagement(ctx, b, &callback.From, msg.ID, lang, "", parts[3], source)
+			return
+		}
 		ticket, err := h.getOwnedTicket(ctx, userID, ticketID)
 		if err != nil {
 			h.renderHWIDText(ctx, b, userID, msg.ID, messages.GetHWIDTicketUnavailableMessage(lang))
 			return
 		}
-		h.renderHWIDManagement(ctx, b, ticket, msg.ID, lang, "", parts[3])
+		h.renderHWIDManagement(ctx, b, ticket, msg.ID, lang, "", parts[3], source)
 
 	case "d":
 		if len(parts) < 5 {
 			return
 		}
+		source := ""
+		if len(parts) > 5 {
+			source = parts[5]
+		}
+		if ticketID == 0 && source == hwidEntrySourceMainMenu {
+			h.deleteStandaloneHWIDDevice(ctx, b, &callback.From, msg.ID, lang, parts[3], parts[4], source)
+			return
+		}
 		ticket, err := h.getOwnedTicket(ctx, userID, ticketID)
 		if err != nil {
 			h.renderHWIDText(ctx, b, userID, msg.ID, messages.GetHWIDTicketUnavailableMessage(lang))
 			return
 		}
-		h.deleteHWIDDevice(ctx, b, ticket, msg.ID, lang, parts[3], parts[4])
+		h.deleteHWIDDevice(ctx, b, ticket, msg.ID, lang, parts[3], parts[4], source)
 	}
 }
 
-func (h *UserHandlers) openHWIDPanel(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, prefixText string) {
+func (h *UserHandlers) openHWIDShortcut(ctx context.Context, b *bot.Bot, user *models.User, lang string, messageID int, source string) {
+	if user == nil {
+		return
+	}
+
+	userID := user.ID
+	banned, err := h.deps.TicketService.IsUserBanned(ctx, userID)
+	if err != nil {
+		utils.LogError("check user ban status", err)
+	}
+	if banned {
+		h.respondWithHWIDShortcutMessage(ctx, b, userID, messageID, messages.GetUserBannedMessageLang(lang))
+		return
+	}
+
+	if h.deps.RemnawaveService == nil || config.YAMLCfg == nil || !config.YAMLCfg.HWID.Enabled {
+		h.respondWithHWIDShortcutMessage(ctx, b, userID, messageID, messages.GetHWIDFeatureUnavailableMessage(lang))
+		return
+	}
+
+	if source == hwidEntrySourceMainMenu {
+		if messageID == 0 {
+			msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:    userID,
+				Text:      messages.GetHWIDShortcutLoadingMessage(lang),
+				ParseMode: models.ParseModeHTML,
+			})
+			if err != nil {
+				utils.LogError("send hwid shortcut loading message", err)
+				return
+			}
+			messageID = msg.ID
+		}
+
+		h.openStandaloneHWIDPanel(ctx, b, user, messageID, lang, "", source)
+		return
+	}
+
+	ticket, created, err := h.ensureHWIDAccessTicket(ctx, b, user, lang)
+	if err != nil {
+		h.respondWithHWIDShortcutMessage(ctx, b, userID, messageID, h.resolveHWIDShortcutErrorMessage(err, lang))
+		return
+	}
+
+	prefixParts := make([]string, 0, 2)
+	if created {
+		prefixParts = append(prefixParts, messages.GetHWIDTicketCreatedMessage(ticket.TicketNumber, lang))
+	}
+	prefixParts = append(prefixParts, h.raiseHWIDTicketPriority(ctx, b, ticket, lang))
+
+	if messageID == 0 {
+		msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:    userID,
+			Text:      messages.GetHWIDShortcutLoadingMessage(lang),
+			ParseMode: models.ParseModeHTML,
+		})
+		if err != nil {
+			utils.LogError("send hwid shortcut loading message", err)
+			return
+		}
+		messageID = msg.ID
+	}
+
+	h.openHWIDPanel(ctx, b, ticket, messageID, lang, joinHWIDSections(prefixParts...), source)
+}
+
+func (h *UserHandlers) ensureHWIDAccessTicket(ctx context.Context, b *bot.Bot, user *models.User, lang string) (*database.Ticket, bool, error) {
+	if user == nil {
+		return nil, false, fmt.Errorf("user is required")
+	}
+
+	ticket, err := h.deps.TicketService.GetOpenTicketByUserID(ctx, user.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if ticket != nil {
+		h.deps.State.SetUserState(user.ID, config.StateInTicket)
+		h.deps.State.SetUserData(user.ID, "ticket_id", ticket.ID)
+		return ticket, false, nil
+	}
+
+	ticket, err = h.deps.TicketService.CreateTicket(ctx, b, user.ID, utils.GetUserNamePtr(user), utils.GetUsernamePtr(user), buildHWIDTicketSubject(lang))
+	if err != nil {
+		return nil, false, err
+	}
+
+	utils.LogTicket("New HWID access ticket #%s created for user %d", ticket.TicketNumber, user.ID)
+	h.deps.State.SetUserState(user.ID, config.StateInTicket)
+	h.deps.State.SetUserData(user.ID, "ticket_id", ticket.ID)
+	h.sendNewTicketThreadNotification(ctx, b, ticket)
+
+	return ticket, true, nil
+}
+
+func (h *UserHandlers) resolveHWIDShortcutErrorMessage(err error, lang string) string {
+	if err == nil {
+		return messages.GetHWIDPanelErrorMessage(lang)
+	}
+
+	if strings.Contains(err.Error(), "banned") {
+		return messages.GetUserBannedMessageLang(lang)
+	}
+	if strings.Contains(err.Error(), "limit") {
+		if config.YAMLCfg != nil {
+			return messages.GetMaxTicketsError(config.YAMLCfg.Tickets.MaxOpenPerUser, lang)
+		}
+		return messages.GetTicketCreateError(lang)
+	}
+	if cooldownSeconds, ok := parseCooldownSeconds(err); ok {
+		return messages.GetTicketCooldownError(cooldownSeconds, lang)
+	}
+
+	return messages.GetHWIDPanelErrorMessage(lang)
+}
+
+func (h *UserHandlers) respondWithHWIDShortcutMessage(ctx context.Context, b *bot.Bot, chatID int64, messageID int, text string) {
+	if messageID > 0 {
+		h.renderHWIDText(ctx, b, chatID, messageID, text)
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+	})
+}
+
+func (h *UserHandlers) openStandaloneHWIDPanel(ctx context.Context, b *bot.Bot, user *models.User, messageID int, lang string, prefixText string, source string) {
+	if user == nil {
+		return
+	}
+
+	users, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, user.ID)
+	if err != nil {
+		utils.LogError("get remnawave users by telegram id", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, joinHWIDSections(prefixText, messages.GetHWIDStandalonePanelErrorMessage(lang)))
+		return
+	}
+	if len(users) == 0 {
+		h.renderHWIDText(ctx, b, user.ID, messageID, joinHWIDSections(prefixText, messages.GetHWIDStandaloneNoPanelUsersMessage(lang)))
+		return
+	}
+
+	if len(users) == 1 {
+		h.renderStandaloneHWIDManagement(ctx, b, user, messageID, lang, prefixText, shortUUID(users[0].UUID), source)
+		return
+	}
+
+	sort.Slice(users, func(i, j int) bool {
+		left := users[i].Username + users[i].UUID
+		right := users[j].Username + users[j].UUID
+		return left < right
+	})
+
+	options := make([]keyboards.CallbackOption, 0, len(users))
+	for _, panelUser := range users {
+		options = append(options, keyboards.CallbackOption{
+			Text: fmt.Sprintf("👤 %s", formatPanelUserLabel(panelUser)),
+			Data: appendHWIDSource(fmt.Sprintf("hwid:u:%d:%s", 0, shortUUID(panelUser.UUID)), source),
+		})
+	}
+
+	refreshLabel := "🔄 Refresh"
+	if lang == database.LangRussian {
+		refreshLabel = "🔄 Обновить"
+	}
+	backLabel, backCallback := buildHWIDBackButton(source, lang)
+
+	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      user.ID,
+		MessageID:   messageID,
+		Text:        joinHWIDSections(prefixText, messages.GetHWIDUserSelectionMessage(lang)),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.HWIDUserSelectionKeyboard(options, refreshLabel, appendHWIDSource("hwid:ru:0", source), backLabel, backCallback),
+	})
+	if err != nil {
+		utils.LogError("edit standalone hwid user selection", err)
+	}
+}
+
+func (h *UserHandlers) openHWIDPanel(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, prefixText string, source string) {
 	users, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, ticket.UserID)
 	if err != nil {
 		utils.LogError("get remnawave users by telegram id", err)
@@ -977,7 +1306,7 @@ func (h *UserHandlers) openHWIDPanel(ctx context.Context, b *bot.Bot, ticket *da
 	}
 
 	if len(users) == 1 {
-		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, prefixText, shortUUID(users[0].UUID))
+		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, prefixText, shortUUID(users[0].UUID), source)
 		return
 	}
 
@@ -991,7 +1320,7 @@ func (h *UserHandlers) openHWIDPanel(ctx context.Context, b *bot.Bot, ticket *da
 	for _, user := range users {
 		options = append(options, keyboards.CallbackOption{
 			Text: fmt.Sprintf("👤 %s", formatPanelUserLabel(user)),
-			Data: fmt.Sprintf("hwid:u:%d:%s", ticket.ID, shortUUID(user.UUID)),
+			Data: appendHWIDSource(fmt.Sprintf("hwid:u:%d:%s", ticket.ID, shortUUID(user.UUID)), source),
 		})
 	}
 
@@ -999,20 +1328,21 @@ func (h *UserHandlers) openHWIDPanel(ctx context.Context, b *bot.Bot, ticket *da
 	if lang == database.LangRussian {
 		refreshLabel = "🔄 Обновить"
 	}
+	backLabel, backCallback := buildHWIDBackButton(source, lang)
 
 	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      ticket.UserID,
 		MessageID:   messageID,
 		Text:        joinHWIDSections(prefixText, messages.GetHWIDUserSelectionMessage(lang)),
 		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: keyboards.HWIDUserSelectionKeyboard(options, refreshLabel, fmt.Sprintf("hwid:ru:%d", ticket.ID)),
+		ReplyMarkup: keyboards.HWIDUserSelectionKeyboard(options, refreshLabel, appendHWIDSource(fmt.Sprintf("hwid:ru:%d", ticket.ID), source), backLabel, backCallback),
 	})
 	if err != nil {
 		utils.LogError("edit hwid user selection", err)
 	}
 }
 
-func (h *UserHandlers) renderHWIDManagement(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, prefixText string, userPrefix string) {
+func (h *UserHandlers) renderHWIDManagement(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, prefixText string, userPrefix string, source string) {
 	panelUsers, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, ticket.UserID)
 	if err != nil {
 		utils.LogError("refresh remnawave users", err)
@@ -1047,7 +1377,7 @@ func (h *UserHandlers) renderHWIDManagement(ctx context.Context, b *bot.Bot, tic
 		for idx, device := range devices {
 			deviceButtons = append(deviceButtons, keyboards.CallbackOption{
 				Text: fmt.Sprintf("🗑 %d. %s", idx+1, truncateDeviceButtonLabel(device, lang)),
-				Data: fmt.Sprintf("hwid:d:%d:%s:%s", ticket.ID, userPrefix, shortHWIDToken(device.HWID)),
+				Data: appendHWIDSource(fmt.Sprintf("hwid:d:%d:%s:%s", ticket.ID, userPrefix, shortHWIDToken(device.HWID)), source),
 			})
 		}
 	}
@@ -1056,20 +1386,83 @@ func (h *UserHandlers) renderHWIDManagement(ctx context.Context, b *bot.Bot, tic
 	if lang == database.LangRussian {
 		refreshLabel = "🔄 Обновить"
 	}
+	backLabel, backCallback := buildHWIDBackButton(source, lang)
 
 	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      ticket.UserID,
 		MessageID:   messageID,
 		Text:        body,
 		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: keyboards.HWIDManagementKeyboard(deviceButtons, refreshLabel, fmt.Sprintf("hwid:r:%d:%s", ticket.ID, userPrefix)),
+		ReplyMarkup: keyboards.HWIDManagementKeyboard(deviceButtons, refreshLabel, appendHWIDSource(fmt.Sprintf("hwid:r:%d:%s", ticket.ID, userPrefix), source), backLabel, backCallback),
 	})
 	if err != nil {
 		utils.LogError("edit hwid management", err)
 	}
 }
 
-func (h *UserHandlers) deleteHWIDDevice(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, userPrefix string, deviceToken string) {
+func (h *UserHandlers) renderStandaloneHWIDManagement(ctx context.Context, b *bot.Bot, user *models.User, messageID int, lang string, prefixText string, userPrefix string, source string) {
+	if user == nil {
+		return
+	}
+
+	panelUsers, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, user.ID)
+	if err != nil {
+		utils.LogError("refresh remnawave users", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, joinHWIDSections(prefixText, messages.GetHWIDStandalonePanelErrorMessage(lang)))
+		return
+	}
+
+	panelUser, ok := findPanelUserByPrefix(panelUsers, userPrefix)
+	if !ok {
+		h.renderHWIDText(ctx, b, user.ID, messageID, joinHWIDSections(prefixText, messages.GetHWIDStandaloneNoPanelUsersMessage(lang)))
+		return
+	}
+
+	devices, err := h.deps.RemnawaveService.GetUserDevices(ctx, panelUser.UUID)
+	if err != nil {
+		utils.LogError("get remnawave hwid devices", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, joinHWIDSections(prefixText, messages.GetHWIDStandalonePanelErrorMessage(lang)))
+		return
+	}
+
+	lastDeleteAt, err := h.deps.DB.GetUserLastHWIDDeleteAt(ctx, user.ID)
+	if err != nil {
+		utils.LogError("get user hwid delete cooldown", err)
+	}
+
+	cooldownRemaining := h.getHWIDDeleteCooldownRemaining(lastDeleteAt)
+	body := buildHWIDManagementText(nil, panelUser, devices, cooldownRemaining, lang)
+	body = joinHWIDSections(prefixText, body)
+
+	deviceButtons := make([]keyboards.CallbackOption, 0, len(devices))
+	if cooldownRemaining <= 0 {
+		for idx, device := range devices {
+			deviceButtons = append(deviceButtons, keyboards.CallbackOption{
+				Text: fmt.Sprintf("🗑 %d. %s", idx+1, truncateDeviceButtonLabel(device, lang)),
+				Data: appendHWIDSource(fmt.Sprintf("hwid:d:%d:%s:%s", 0, userPrefix, shortHWIDToken(device.HWID)), source),
+			})
+		}
+	}
+
+	refreshLabel := "🔄 Refresh"
+	if lang == database.LangRussian {
+		refreshLabel = "🔄 Обновить"
+	}
+	backLabel, backCallback := buildHWIDBackButton(source, lang)
+
+	_, err = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      user.ID,
+		MessageID:   messageID,
+		Text:        body,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.HWIDManagementKeyboard(deviceButtons, refreshLabel, appendHWIDSource(fmt.Sprintf("hwid:r:%d:%s", 0, userPrefix), source), backLabel, backCallback),
+	})
+	if err != nil {
+		utils.LogError("edit standalone hwid management", err)
+	}
+}
+
+func (h *UserHandlers) deleteHWIDDevice(ctx context.Context, b *bot.Bot, ticket *database.Ticket, messageID int, lang string, userPrefix string, deviceToken string, source string) {
 	panelUsers, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, ticket.UserID)
 	if err != nil {
 		utils.LogError("refresh remnawave users before delete", err)
@@ -1090,7 +1483,7 @@ func (h *UserHandlers) deleteHWIDDevice(ctx context.Context, b *bot.Bot, ticket 
 
 	cooldownRemaining := h.getHWIDDeleteCooldownRemaining(lastDeleteAt)
 	if cooldownRemaining > 0 {
-		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDDeleteCooldownMessage(cooldownRemaining, lang), userPrefix)
+		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDDeleteCooldownMessage(cooldownRemaining, lang), userPrefix, source)
 		return
 	}
 
@@ -1109,7 +1502,7 @@ func (h *UserHandlers) deleteHWIDDevice(ctx context.Context, b *bot.Bot, ticket 
 		}
 	}
 	if selectedDevice == nil {
-		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDPanelErrorMessage(lang), userPrefix)
+		h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDPanelErrorMessage(lang), userPrefix, source)
 		return
 	}
 
@@ -1118,11 +1511,76 @@ func (h *UserHandlers) deleteHWIDDevice(ctx context.Context, b *bot.Bot, ticket 
 		h.renderHWIDText(ctx, b, ticket.UserID, messageID, messages.GetHWIDPanelErrorMessage(lang))
 		return
 	}
-	if err := h.deps.DB.SetUserLastHWIDDeleteAt(ctx, ticket.UserID, time.Now().UTC()); err != nil {
+	deletedAt := time.Now().UTC()
+	if err := h.deps.DB.SetUserLastHWIDDeleteAt(ctx, ticket.UserID, deletedAt); err != nil {
 		utils.LogError("save user hwid delete timestamp", err)
 	}
+	h.logHWIDDeviceDeletion(ctx, b, ticket, nil, panelUser, selectedDevice, deletedAt)
 
-	h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDDeleteSuccessMessage(lang), userPrefix)
+	h.renderHWIDManagement(ctx, b, ticket, messageID, lang, messages.GetHWIDDeleteSuccessMessage(lang), userPrefix, source)
+}
+
+func (h *UserHandlers) deleteStandaloneHWIDDevice(ctx context.Context, b *bot.Bot, user *models.User, messageID int, lang string, userPrefix string, deviceToken string, source string) {
+	if user == nil {
+		return
+	}
+
+	panelUsers, err := h.deps.RemnawaveService.GetUsersByTelegramID(ctx, user.ID)
+	if err != nil {
+		utils.LogError("refresh remnawave users before delete", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, messages.GetHWIDStandalonePanelErrorMessage(lang))
+		return
+	}
+
+	panelUser, ok := findPanelUserByPrefix(panelUsers, userPrefix)
+	if !ok {
+		h.renderHWIDText(ctx, b, user.ID, messageID, messages.GetHWIDStandaloneNoPanelUsersMessage(lang))
+		return
+	}
+
+	lastDeleteAt, err := h.deps.DB.GetUserLastHWIDDeleteAt(ctx, user.ID)
+	if err != nil {
+		utils.LogError("get user hwid delete cooldown", err)
+	}
+
+	cooldownRemaining := h.getHWIDDeleteCooldownRemaining(lastDeleteAt)
+	if cooldownRemaining > 0 {
+		h.renderStandaloneHWIDManagement(ctx, b, user, messageID, lang, messages.GetHWIDDeleteCooldownMessage(cooldownRemaining, lang), userPrefix, source)
+		return
+	}
+
+	devices, err := h.deps.RemnawaveService.GetUserDevices(ctx, panelUser.UUID)
+	if err != nil {
+		utils.LogError("refresh remnawave devices before delete", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, messages.GetHWIDStandalonePanelErrorMessage(lang))
+		return
+	}
+
+	var selectedDevice *services.RemnawaveDevice
+	for i := range devices {
+		if shortHWIDToken(devices[i].HWID) == deviceToken {
+			selectedDevice = &devices[i]
+			break
+		}
+	}
+	if selectedDevice == nil {
+		h.renderStandaloneHWIDManagement(ctx, b, user, messageID, lang, messages.GetHWIDStandalonePanelErrorMessage(lang), userPrefix, source)
+		return
+	}
+
+	if err := h.deps.RemnawaveService.DeleteUserDevice(ctx, panelUser.UUID, selectedDevice.HWID); err != nil {
+		utils.LogError("delete remnawave hwid device", err)
+		h.renderHWIDText(ctx, b, user.ID, messageID, messages.GetHWIDStandalonePanelErrorMessage(lang))
+		return
+	}
+
+	deletedAt := time.Now().UTC()
+	if err := h.deps.DB.SetUserLastHWIDDeleteAt(ctx, user.ID, deletedAt); err != nil {
+		utils.LogError("save user hwid delete timestamp", err)
+	}
+	h.logHWIDDeviceDeletion(ctx, b, nil, user, panelUser, selectedDevice, deletedAt)
+
+	h.renderStandaloneHWIDManagement(ctx, b, user, messageID, lang, messages.GetHWIDDeleteSuccessMessage(lang), userPrefix, source)
 }
 
 func (h *UserHandlers) getOwnedTicket(ctx context.Context, userID int64, ticketID int) (*database.Ticket, error) {
@@ -1183,6 +1641,47 @@ func (h *UserHandlers) raiseHWIDTicketPriority(ctx context.Context, b *bot.Bot, 
 		return fmt.Sprintf("🔴 <b>Ticket #%s priority was raised to urgent.</b>", utils.EscapeHTML(ticket.TicketNumber))
 	}
 	return fmt.Sprintf("⚠️ <b>Failed to automatically raise ticket #%s priority.</b>", utils.EscapeHTML(ticket.TicketNumber))
+}
+
+func (h *UserHandlers) logHWIDDeviceDeletion(ctx context.Context, b *bot.Bot, ticket *database.Ticket, user *models.User, panelUser services.RemnawaveUser, device *services.RemnawaveDevice, deletedAt time.Time) {
+	if device == nil || h.deps == nil || h.deps.Config == nil || h.deps.Config.HWIDDeleteLogThreadID <= 0 {
+		return
+	}
+
+	var (
+		userDisplay string
+		userID      int64
+	)
+	if ticket != nil {
+		userDisplay = ticket.GetDisplayName()
+		userID = ticket.UserID
+	} else {
+		userDisplay = utils.GetUserDisplayName(user)
+		if user != nil {
+			userID = user.ID
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🗑 <b>HWID device removed</b>\n\n")
+	if ticket != nil {
+		sb.WriteString(fmt.Sprintf("🎫 <b>Ticket:</b> #%s\n", utils.EscapeHTML(ticket.TicketNumber)))
+	}
+	sb.WriteString(fmt.Sprintf("👤 <b>User:</b> %s\n", utils.EscapeHTML(userDisplay)))
+	sb.WriteString(fmt.Sprintf("🆔 <b>Telegram ID:</b> <code>%d</code>\n", userID))
+	sb.WriteString(fmt.Sprintf("📂 <b>Profile:</b> %s\n", utils.EscapeHTML(formatPanelUserLabel(panelUser))))
+	sb.WriteString(fmt.Sprintf("📱 <b>Device:</b> %s\n", utils.EscapeHTML(formatDeviceLine(*device, database.LangEnglish))))
+	sb.WriteString(fmt.Sprintf("🔑 <b>Device token:</b> <code>%s</code>\n", shortHWIDToken(device.HWID)))
+	sb.WriteString(fmt.Sprintf("🕒 <b>Deleted at:</b> %s", utils.EscapeHTML(deletedAt.Format("2006-01-02 15:04:05 UTC"))))
+
+	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          h.deps.Config.SupportChatID,
+		MessageThreadID: h.deps.Config.HWIDDeleteLogThreadID,
+		Text:            sb.String(),
+		ParseMode:       models.ParseModeHTML,
+	}); err != nil {
+		utils.LogError("send hwid delete log", err)
+	}
 }
 
 func (h *UserHandlers) getHWIDDeleteCooldownRemaining(lastDeleteAt *time.Time) time.Duration {
@@ -1262,32 +1761,34 @@ func findPanelUserByPrefix(users []services.RemnawaveUser, prefix string) (servi
 func buildHWIDManagementText(ticket *database.Ticket, panelUser services.RemnawaveUser, devices []services.RemnawaveDevice, cooldownRemaining time.Duration, lang string) string {
 	var sb strings.Builder
 	title := "🧩 <b>HWID Device Management</b>"
-	ticketLabel := "Ticket"
-	accountLabel := "Account"
+	accountLabel := "Profile"
 	limitLabel := "Device limit"
 	connectedLabel := "Connected devices"
-	cooldownLabel := "Delete cooldown"
 	noDevicesText := "No connected devices were found."
 
 	if lang == database.LangRussian {
 		title = "🧩 <b>Управление подключёнными устройствами</b>"
-		ticketLabel = "Тикет"
-		accountLabel = "Профиль панели"
+		accountLabel = "Профиль"
 		limitLabel = "Лимит устройств"
 		connectedLabel = "Подключённые устройства"
-		cooldownLabel = "Кулдаун удаления"
 		noDevicesText = "Подключённые устройства не найдены."
 	}
 
 	sb.WriteString(title)
 	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("🎫 <b>%s:</b> #%s\n", ticketLabel, utils.EscapeHTML(ticket.TicketNumber)))
+	if ticket != nil {
+		ticketLabel := "Ticket"
+		if lang == database.LangRussian {
+			ticketLabel = "Тикет"
+		}
+		sb.WriteString(fmt.Sprintf("🎫 <b>%s:</b> #%s\n", ticketLabel, utils.EscapeHTML(ticket.TicketNumber)))
+	}
 	sb.WriteString(fmt.Sprintf("👤 <b>%s:</b> %s\n", accountLabel, utils.EscapeHTML(formatPanelUserLabel(panelUser))))
 	sb.WriteString(fmt.Sprintf("📏 <b>%s:</b> %s\n", limitLabel, utils.EscapeHTML(formatPanelDeviceLimit(panelUser, lang))))
 	sb.WriteString(fmt.Sprintf("📱 <b>%s:</b> %d\n", connectedLabel, len(devices)))
 
 	if cooldownRemaining > 0 {
-		sb.WriteString(fmt.Sprintf("⏳ <b>%s:</b> %s\n", cooldownLabel, utils.EscapeHTML(formatDuration(cooldownRemaining, lang))))
+		sb.WriteString(buildHWIDCooldownLine(cooldownRemaining, lang))
 	}
 
 	sb.WriteString("\n")
@@ -1304,10 +1805,10 @@ func buildHWIDManagementText(ticket *database.Ticket, panelUser services.Remnawa
 }
 
 func formatPanelUserLabel(user services.RemnawaveUser) string {
-	if strings.TrimSpace(user.Username) == "" {
-		return user.UUID
+	if username := strings.TrimSpace(user.Username); username != "" {
+		return username
 	}
-	return fmt.Sprintf("%s (%s)", user.Username, shortUUID(user.UUID))
+	return user.UUID
 }
 
 func formatPanelDeviceLimit(user services.RemnawaveUser, lang string) string {
@@ -1321,7 +1822,7 @@ func formatPanelDeviceLimit(user services.RemnawaveUser, lang string) string {
 }
 
 func formatDeviceLine(device services.RemnawaveDevice, lang string) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 3)
 	if value := firstNonEmpty(device.Platform, device.DeviceModel); value != "" {
 		parts = append(parts, value)
 	}
@@ -1331,7 +1832,6 @@ func formatDeviceLine(device services.RemnawaveDevice, lang string) string {
 	if value := valueOrEmpty(device.UserAgent); value != "" {
 		parts = append(parts, value)
 	}
-	parts = append(parts, shortDeviceHWID(device.HWID))
 
 	label := strings.Join(parts, " | ")
 	if label != "" {
@@ -1341,6 +1841,14 @@ func formatDeviceLine(device services.RemnawaveDevice, lang string) string {
 		return "Неизвестное устройство"
 	}
 	return "Unknown device"
+}
+
+func buildHWIDCooldownLine(duration time.Duration, lang string) string {
+	formatted := utils.EscapeHTML(formatDuration(duration, lang))
+	if lang == database.LangRussian {
+		return fmt.Sprintf("⏳ <b>Следующее удаление через %s</b>\n", formatted)
+	}
+	return fmt.Sprintf("⏳ <b>Next removal available in %s</b>\n", formatted)
 }
 
 func truncateDeviceButtonLabel(device services.RemnawaveDevice, lang string) string {
@@ -1393,13 +1901,6 @@ func shortUUID(value string) string {
 	return value[:8]
 }
 
-func shortDeviceHWID(hwid string) string {
-	if len(hwid) <= 12 {
-		return hwid
-	}
-	return hwid[:6] + "..." + hwid[len(hwid)-4:]
-}
-
 func shortHWIDToken(hwid string) string {
 	sum := sha1.Sum([]byte(hwid))
 	return hex.EncodeToString(sum[:])[:12]
@@ -1430,6 +1931,167 @@ func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ti
 
 	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {
 		utils.LogError("save automated ticket welcome", err)
+	}
+}
+
+func (h *UserHandlers) sendUserTicketDetails(ctx context.Context, b *bot.Bot, chatID int64, ticket *database.Ticket, lang string) {
+	if ticket == nil {
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        messages.FormatTicketDetailsForUser(ticket),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.UserTicketDetailsKeyboard(ticket.ID, ticket.IsOpen(), lang),
+	})
+}
+
+func (h *UserHandlers) renderUserTicketDetails(ctx context.Context, b *bot.Bot, chatID int64, messageID int, ticket *database.Ticket, lang string) {
+	if ticket == nil {
+		return
+	}
+
+	_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		Text:        messages.FormatTicketDetailsForUser(ticket),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.UserTicketDetailsKeyboard(ticket.ID, ticket.IsOpen(), lang),
+	})
+	if err != nil {
+		utils.LogError("edit user ticket details", err)
+	}
+}
+
+func (h *UserHandlers) renderUserCloseTicketConfirmation(ctx context.Context, b *bot.Bot, chatID int64, messageID int, ticket *database.Ticket, lang string) {
+	if ticket == nil {
+		return
+	}
+
+	_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		Text:        messages.GetUserCloseTicketConfirmationMessage(ticket.TicketNumber, lang),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.UserCloseTicketConfirmKeyboard(ticket.ID, lang),
+	})
+	if err != nil {
+		utils.LogError("edit user close ticket confirmation", err)
+	}
+}
+
+func (h *UserHandlers) closeUserTicket(ctx context.Context, b *bot.Bot, user *models.User, messageID int, ticket *database.Ticket, lang string) {
+	if user == nil || ticket == nil {
+		return
+	}
+
+	if !ticket.IsOpen() {
+		h.renderUserTicketDetails(ctx, b, user.ID, messageID, ticket, lang)
+		return
+	}
+
+	closedByName := utils.GetUserFullName(user)
+	closedByDisplay := utils.GetUserDisplayName(user)
+	if err := h.deps.TicketService.CloseTicket(ctx, b, ticket.ID, user.ID, closedByName); err != nil {
+		utils.LogError("close ticket by user", err)
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:      user.ID,
+			MessageID:   messageID,
+			Text:        messages.GetUserCloseTicketErrorMessage(lang),
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: keyboards.UserTicketDetailsKeyboard(ticket.ID, ticket.IsOpen(), lang),
+		})
+		return
+	}
+
+	utils.LogTicket("Ticket #%s closed by user %s", ticket.TicketNumber, closedByDisplay)
+
+	updatedTicket, err := h.deps.TicketService.GetTicketByID(ctx, ticket.ID)
+	if err != nil || updatedTicket == nil {
+		now := time.Now()
+		ticket.Status = config.TicketStatusClosed
+		ticket.ClosedAt = &now
+		updatedTicket = ticket
+	}
+
+	h.renderUserTicketDetails(ctx, b, user.ID, messageID, updatedTicket, lang)
+
+	if ticket.ThreadID > 1 {
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          ticket.SupportChatID,
+			MessageThreadID: int(ticket.ThreadID),
+			Text:            fmt.Sprintf("🔒 <b>Ticket closed by user %s</b>", utils.EscapeHTML(closedByDisplay)),
+			ParseMode:       models.ParseModeHTML,
+			ReplyMarkup:     keyboards.TicketActionsKeyboard(ticket.ID, false),
+		})
+	}
+
+	h.deps.State.ClearUserState(ticket.UserID)
+}
+
+func (h *UserHandlers) sendNewTicketThreadNotification(ctx context.Context, b *bot.Bot, ticket *database.Ticket) {
+	if ticket == nil {
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          ticket.SupportChatID,
+		MessageThreadID: int(ticket.ThreadID),
+		Text: fmt.Sprintf("🆕 <b>New Support Ticket</b>\n\n"+
+			"👤 <b>User:</b> %s\n"+
+			"🆔 <b>ID:</b> <code>%d</code>\n"+
+			"📅 <b>Created:</b> %s\n\n"+
+			"<i>Reply to this thread to respond to the user.</i>",
+			utils.EscapeHTML(ticket.GetDisplayName()),
+			ticket.UserID,
+			ticket.CreatedAt.Format("02 Jan 2006 15:04")),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: keyboards.TicketActionsKeyboard(ticket.ID, true),
+	})
+}
+
+func buildHWIDTicketSubject(lang string) string {
+	if lang == database.LangRussian {
+		return "Управление устройствами"
+	}
+	return "HWID device management"
+}
+
+func buildUserMainMenuKeyboard(lang string) *models.InlineKeyboardMarkup {
+	if lang == database.LangRussian {
+		return keyboards.NewTicketKeyboardRu()
+	}
+	return keyboards.NewTicketKeyboard()
+}
+
+func appendHWIDSource(callbackData, source string) string {
+	if source == "" {
+		return callbackData
+	}
+	return callbackData + ":" + source
+}
+
+func buildHWIDBackButton(source, lang string) (string, string) {
+	if source != hwidEntrySourceMainMenu {
+		return "", ""
+	}
+	if lang == database.LangRussian {
+		return "⬅️ Главное меню", "hwid:back:main"
+	}
+	return "⬅️ Main menu", "hwid:back:main"
+}
+
+func (h *UserHandlers) renderUserMainMenu(ctx context.Context, b *bot.Bot, chatID int64, messageID int, lang string) {
+	_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		Text:        messages.GetWelcomeMessageLang(lang),
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: buildUserMainMenuKeyboard(lang),
+	})
+	if err != nil {
+		utils.LogError("edit user main menu", err)
 	}
 }
 

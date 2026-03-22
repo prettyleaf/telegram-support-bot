@@ -10,6 +10,7 @@ import (
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
 	"remnafamily/internal/handlers"
+	"remnafamily/internal/keyboards"
 	"remnafamily/internal/messages"
 	"remnafamily/internal/services"
 	"remnafamily/internal/state"
@@ -146,6 +147,7 @@ func (a *App) registerHandlers() {
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleStart))
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/newticket", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleNewTicket))
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/mytickets", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleMyTickets))
+	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/devices", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleDevices))
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/cancel", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleCancel))
 	a.Bot.RegisterHandler(bot.HandlerTypeMessageText, "/language", bot.MatchTypePrefix, a.handlePrivateCommand(a.userHandlers.HandleLanguage))
 
@@ -338,6 +340,7 @@ func (a *App) runAutoClosePass() {
 				MessageThreadID: int(ticket.ThreadID),
 				Text:            "🔒 <b>Ticket auto-closed due to inactivity.</b>",
 				ParseMode:       models.ParseModeHTML,
+				ReplyMarkup:     keyboards.TicketReopenKeyboard(ticket.ID),
 			})
 		}
 	}
