@@ -110,6 +110,38 @@ You can send any extra details in this chat at any time.`
 	return strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
 }
 
+// GetTicketOutOfHoursMessageLang returns the automated out-of-hours notice in the specified language.
+func GetTicketOutOfHoursMessageLang(ticketNumber, workingHours, lang string) string {
+	var msg string
+	if lang == database.LangRussian {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketOutOfHoursRu
+		}
+		if msg == "" {
+			msg = `🌙 <b>Сейчас нерабочее время.</b>
+
+Мы получили ваш тикет #{ticket_number} и ответим в рабочие часы.
+
+<b>Часы поддержки:</b> <code>{working_hours}</code>.`
+		}
+	} else {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketOutOfHours
+		}
+		if msg == "" {
+			msg = `🌙 <b>We are currently outside business hours.</b>
+
+We received your ticket #{ticket_number} and will reply during working hours.
+
+<b>Support hours:</b> <code>{working_hours}</code>.`
+		}
+	}
+
+	msg = strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
+	msg = strings.ReplaceAll(msg, "{working_hours}", utils.EscapeHTML(workingHours))
+	return msg
+}
+
 // Ticket closed message
 func GetTicketClosedMessage(ticketNumber string) string {
 	return GetTicketClosedMessageLang(ticketNumber, "en")

@@ -28,6 +28,41 @@ tickets:
 	}
 }
 
+func TestLoadYAMLConfigBusinessHoursDefaults(t *testing.T) {
+	cfg := loadTestYAMLConfig(t, `
+business_hours:
+  enabled: true
+`)
+
+	if cfg.BusinessHours.Timezone != "UTC" {
+		t.Fatalf("expected default timezone UTC, got %q", cfg.BusinessHours.Timezone)
+	}
+	if cfg.BusinessHours.Start != "09:00" {
+		t.Fatalf("expected default start 09:00, got %q", cfg.BusinessHours.Start)
+	}
+	if cfg.BusinessHours.End != "18:00" {
+		t.Fatalf("expected default end 18:00, got %q", cfg.BusinessHours.End)
+	}
+}
+
+func TestLoadYAMLConfigRejectsInvalidBusinessHoursTimezone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `
+business_hours:
+  enabled: true
+  timezone: "Mars/Olympus"
+  start: "09:00"
+  end: "18:00"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	if _, err := LoadYAMLConfig(path); err == nil {
+		t.Fatalf("expected invalid business hours timezone to return an error")
+	}
+}
+
 func loadTestYAMLConfig(t *testing.T, content string) *YAMLConfig {
 	t.Helper()
 

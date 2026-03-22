@@ -1907,9 +1907,22 @@ func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ti
 	}
 
 	body := messages.GetTicketWelcomeMessageLang(ticket.TicketNumber, lang)
+	h.sendAutomatedTicketReply(ctx, b, ticket, body, "send automated ticket welcome", "save automated ticket welcome")
+
+	outOfHoursBody := h.buildTicketOutOfHoursNotice(ticket.TicketNumber, lang, time.Now())
+	if outOfHoursBody != "" {
+		h.sendAutomatedTicketReply(ctx, b, ticket, outOfHoursBody, "send out-of-hours ticket notice", "save out-of-hours ticket notice")
+	}
+}
+
+func (h *UserHandlers) sendAutomatedTicketReply(ctx context.Context, b *bot.Bot, ticket *database.Ticket, body, sendLogOp, saveLogOp string) {
+	if ticket == nil || strings.TrimSpace(body) == "" {
+		return
+	}
+
 	sentMsg, err := h.deps.TicketService.SendSupportTextToUser(ctx, b, ticket, body)
 	if err != nil {
-		utils.LogError("send automated ticket welcome", err)
+		utils.LogError(sendLogOp, err)
 		return
 	}
 
@@ -1925,8 +1938,25 @@ func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ti
 	}
 
 	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {
-		utils.LogError("save automated ticket welcome", err)
+		utils.LogError(saveLogOp, err)
 	}
+}
+
+func (h *UserHandlers) buildTicketOutOfHoursNotice(ticketNumber, lang string, now time.Time) string {
+	if config.YAMLCfg == nil {
+		return ""
+	}
+
+	isWithinHours, err := config.YAMLCfg.BusinessHours.IsWithin(now)
+	if err != nil {
+		utils.LogError("evaluate business hours", err)
+		return ""
+	}
+	if isWithinHours {
+		return ""
+	}
+
+	return messages.GetTicketOutOfHoursMessageLang(ticketNumber, config.YAMLCfg.BusinessHours.ScheduleLabel(), lang)
 }
 
 func (h *UserHandlers) sendUserTicketDetails(ctx context.Context, b *bot.Bot, chatID int64, ticket *database.Ticket, lang string) {

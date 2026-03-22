@@ -10,14 +10,15 @@ import (
 
 // YAMLConfig holds all configuration from config.yaml
 type YAMLConfig struct {
-	Bot       BotConfig       `yaml:"bot"`
-	Tickets   TicketsConfig   `yaml:"tickets"`
-	Captcha   CaptchaConfig   `yaml:"captcha"`
-	HWID      HWIDConfig      `yaml:"hwid"`
-	Messages  MessagesConfig  `yaml:"messages"`
-	Database  DatabaseConfig  `yaml:"database"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Thread    ThreadConfig    `yaml:"thread"`
+	Bot           BotConfig           `yaml:"bot"`
+	Tickets       TicketsConfig       `yaml:"tickets"`
+	Captcha       CaptchaConfig       `yaml:"captcha"`
+	HWID          HWIDConfig          `yaml:"hwid"`
+	BusinessHours BusinessHoursConfig `yaml:"business_hours"`
+	Messages      MessagesConfig      `yaml:"messages"`
+	Database      DatabaseConfig      `yaml:"database"`
+	RateLimit     RateLimitConfig     `yaml:"rate_limit"`
+	Thread        ThreadConfig        `yaml:"thread"`
 }
 
 type BotConfig struct {
@@ -52,13 +53,15 @@ type HWIDConfig struct {
 }
 
 type MessagesConfig struct {
-	Welcome         string `yaml:"welcome"`
-	TicketCreated   string `yaml:"ticket_created"`
-	TicketWelcome   string `yaml:"ticket_welcome"`
-	TicketWelcomeRu string `yaml:"ticket_welcome_ru"`
-	TicketClosed    string `yaml:"ticket_closed"`
-	TicketReopened  string `yaml:"ticket_reopened"`
-	UserBanned      string `yaml:"user_banned"`
+	Welcome             string `yaml:"welcome"`
+	TicketCreated       string `yaml:"ticket_created"`
+	TicketWelcome       string `yaml:"ticket_welcome"`
+	TicketWelcomeRu     string `yaml:"ticket_welcome_ru"`
+	TicketOutOfHours    string `yaml:"ticket_out_of_hours"`
+	TicketOutOfHoursRu  string `yaml:"ticket_out_of_hours_ru"`
+	TicketClosed        string `yaml:"ticket_closed"`
+	TicketReopened      string `yaml:"ticket_reopened"`
+	UserBanned          string `yaml:"user_banned"`
 }
 
 type DatabaseConfig struct {
@@ -138,6 +141,10 @@ func LoadYAMLConfig(path string) (*YAMLConfig, error) {
 	}
 	cfg.Captcha = normalizeCaptchaConfig(cfg.Captcha)
 	cfg.HWID.TriggerKeywords = normalizeHWIDKeywords(cfg.HWID.TriggerKeywords)
+	cfg.BusinessHours, err = normalizeBusinessHoursConfig(cfg.BusinessHours)
+	if err != nil {
+		return nil, err
+	}
 	cfg.Thread.IconColor = normalizeThreadIconColor(cfg.Thread.IconColor)
 
 	return &cfg, nil

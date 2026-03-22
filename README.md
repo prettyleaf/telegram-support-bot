@@ -15,6 +15,7 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **Language Selection**: English and Russian user flows
 - **Ticket Stats**: View ticket activity summaries from admin commands
 - **Automatic Ticket Welcome**: Send a configurable first support reply on new tickets
+- **Business Hours Notice**: Optionally warn users when a ticket is opened outside support hours
 - **Onboarding Captcha**: Require a verification step on first bot launch, with generated or custom questions
 - **HWID Device Flow**: Detect HWID/device-limit questions, auto-escalate the ticket, and let users remove panel devices with a cooldown
 
@@ -87,6 +88,12 @@ hwid:
     - "delete device"
     - "device limit"
 
+business_hours:
+  enabled: true
+  timezone: "Europe/Moscow"
+  start: "10:00"
+  end: "19:00"
+
 messages:
   welcome: |
     👋 Welcome to Support!
@@ -101,6 +108,14 @@ messages:
     👋 <b>Здравствуйте!</b>
     Ваш тикет #{ticket_number} открыт.
     Вы можете отправить дополнительные детали в этом чате в любое время.
+  ticket_out_of_hours: |
+    🌙 <b>We are currently outside business hours.</b>
+    We received your ticket #{ticket_number} and will reply during working hours.
+    <b>Support hours:</b> <code>{working_hours}</code>.
+  ticket_out_of_hours_ru: |
+    🌙 <b>Сейчас нерабочее время.</b>
+    Мы получили ваш тикет #{ticket_number} и ответим в рабочие часы.
+    <b>Часы поддержки:</b> <code>{working_hours}</code>.
   ticket_closed: |
     🔒 Ticket #{ticket_number} has been closed.
 ```
