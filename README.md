@@ -19,6 +19,39 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **Onboarding Captcha**: Require a verification step on first bot launch, with generated or custom questions
 - **HWID Device Flow**: Detect HWID/device-limit questions, auto-escalate the ticket, and let users remove panel devices with a cooldown
 
+## Deployment Image Workflow
+
+The repository includes a GitHub Actions workflow at `.github/workflows/docker-image-tar.yml` that builds a Docker image tarball named `support-ticket-bot-<VERSION>.tar`.
+
+### Release flow
+
+1. Create and push a Git tag such as `1.2.3`:
+   ```bash
+   git tag 1.2.3
+   git push origin 1.2.3
+   ```
+2. Wait for the `Build Docker Image Tar` workflow to finish.
+3. Download `support-ticket-bot-1.2.3.tar` from the workflow artifacts or the GitHub Release assets.
+4. Load the image on the target server:
+   ```bash
+   docker load -i support-ticket-bot-1.2.3.tar
+   ```
+5. Set `BOT_VERSION=1.2.3` in `.env`.
+6. Start or update the stack:
+   ```bash
+   docker compose up -d
+   ```
+
+The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and sets the release description to `commit (<commit id>)`.
+
+The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.
+
+Minimum `.env` example for the image version:
+
+```env
+BOT_VERSION=1.2.3
+```
+
 ## Commands
 
 ### User Commands (in private chat with bot)
