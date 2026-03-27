@@ -43,12 +43,14 @@ jobs:
             exit 1
           fi
 
-          ARTIFACT_NAME="${IMAGE_NAME}-${VERSION}.tar"
           IMAGE_REF="${IMAGE_NAME}:${VERSION}"
+          ARTIFACT_NAME_AMD64="${IMAGE_NAME}-${VERSION}-linux-amd64.tar"
+          ARTIFACT_NAME_ARM64="${IMAGE_NAME}-${VERSION}-linux-arm64.tar"
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
           echo "image_ref=${IMAGE_REF}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name_amd64=${ARTIFACT_NAME_AMD64}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_name_arm64=${ARTIFACT_NAME_ARM64}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -59,22 +61,42 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-      - name: Build Docker image
-        run: docker build --tag "${{ steps.meta.outputs.image_ref }}" .
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Export Docker image tarball
-        run: docker save --output "${{ steps.meta.outputs.artifact_name }}" "${{ steps.meta.outputs.image_ref }}"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Generate checksum
-        run: sha256sum "${{ steps.meta.outputs.artifact_name }}" > "${{ steps.meta.outputs.artifact_name }}.sha256"
+      - name: Build linux/amd64 Docker image tarball
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag "${{ steps.meta.outputs.image_ref }}" \
+            --output "type=docker,dest=${{ steps.meta.outputs.artifact_name_amd64 }}" \
+            .
+
+      - name: Build linux/arm64 Docker image tarball
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag "${{ steps.meta.outputs.image_ref }}" \
+            --output "type=docker,dest=${{ steps.meta.outputs.artifact_name_arm64 }}" \
+            .
+
+      - name: Generate checksums
+        run: |
+          sha256sum "${{ steps.meta.outputs.artifact_name_amd64 }}" > "${{ steps.meta.outputs.artifact_name_amd64 }}.sha256"
+          sha256sum "${{ steps.meta.outputs.artifact_name_arm64 }}" > "${{ steps.meta.outputs.artifact_name_arm64 }}.sha256"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-image-${{ steps.meta.outputs.version }}
           path: |
-            ${{ steps.meta.outputs.artifact_name }}
-            ${{ steps.meta.outputs.artifact_name }}.sha256
+            ${{ steps.meta.outputs.artifact_name_amd64 }}
+            ${{ steps.meta.outputs.artifact_name_amd64 }}.sha256
+            ${{ steps.meta.outputs.artifact_name_arm64 }}
+            ${{ steps.meta.outputs.artifact_name_arm64 }}.sha256
           if-no-files-found: error
 
       - name: Create GitHub release and upload assets
@@ -85,5 +107,7 @@ jobs:
           name: ${{ steps.meta.outputs.version }}
           generate_release_notes: true
           files: |
-            ${{ steps.meta.outputs.artifact_name }}
-            ${{ steps.meta.outputs.artifact_name }}.sha256
+            ${{ steps.meta.outputs.artifact_name_amd64 }}
+            ${{ steps.meta.outputs.artifact_name_amd64 }}.sha256
+            ${{ steps.meta.outputs.artifact_name_arm64 }}
+            ${{ steps.meta.outputs.artifact_name_arm64 }}.sha256
