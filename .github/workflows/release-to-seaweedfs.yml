@@ -1,0 +1,64 @@
+name: Upload Release Assets to SeaweedFS
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  upload-to-seaweedfs:
+    runs-on: ubuntu-latest
+    env:
+      SEAWEEDFS_S3_ENDPOINT: ${{ secrets.SEAWEEDFS_S3_ENDPOINT }}
+      SEAWEEDFS_S3_BUCKET: ${{ secrets.SEAWEEDFS_S3_BUCKET }}
+      SEAWEEDFS_S3_PREFIX: ${{ secrets.SEAWEEDFS_S3_PREFIX }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.SEAWEEDFS_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SEAWEEDFS_S3_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.SEAWEEDFS_S3_REGION }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Validate SeaweedFS upload settings
+        run: |
+          required_vars="SEAWEEDFS_S3_ENDPOINT SEAWEEDFS_S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY"
+          for var_name in ${required_vars}; do
+            if [ -z "$(printenv "${var_name}")" ]; then
+              echo "Missing required secret: ${var_name}" >&2
+              exit 1
+            fi
+          done
+
+          if [ -z "${AWS_DEFAULT_REGION}" ]; then
+            export AWS_DEFAULT_REGION="us-east-1"
+            echo "AWS_DEFAULT_REGION=us-east-1" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Download tar assets from GitHub release
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --dir release-assets \
+            --pattern "*.tar"
+
+      - name: Configure AWS CLI for SeaweedFS
+        run: aws configure set default.s3.addressing_style path
+
+      - name: Upload tar assets to SeaweedFS
+        run: |
+          tag_name="${{ github.event.release.tag_name }}"
+          prefix="${SEAWEEDFS_S3_PREFIX#/}"
+          if [ -n "${prefix}" ]; then
+            destination="s3://${SEAWEEDFS_S3_BUCKET}/${prefix}/${tag_name}/"
+          else
+            destination="s3://${SEAWEEDFS_S3_BUCKET}/${tag_name}/"
+          fi
+
+          aws s3 cp release-assets/ "${destination}" \
+            --recursive \
+            --exclude "*" \
+            --include "*.tar" \
+            --endpoint-url "${SEAWEEDFS_S3_ENDPOINT}"

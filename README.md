@@ -59,6 +59,28 @@ Minimum `.env` example for the image version:
 BOT_VERSION=1.2.3
 ```
 
+### SeaweedFS upload workflow
+
+The repository also includes `.github/workflows/release-to-seaweedfs.yml`. It runs on every published GitHub Release, downloads the release `.tar` assets, and uploads them to SeaweedFS through its S3-compatible endpoint.
+
+Required repository secrets:
+
+- `SEAWEEDFS_S3_ENDPOINT`
+- `SEAWEEDFS_S3_BUCKET`
+- `SEAWEEDFS_S3_ACCESS_KEY_ID`
+- `SEAWEEDFS_S3_SECRET_ACCESS_KEY`
+
+Optional repository secrets:
+
+- `SEAWEEDFS_S3_REGION` (defaults to `us-east-1` when empty)
+- `SEAWEEDFS_S3_PREFIX` (for example `telegram-support-bot/releases`)
+
+Uploaded object path format:
+
+```text
+s3://<bucket>/<prefix>/<version>/<filename>.tar
+```
+
 ## Commands
 
 ### User Commands (in private chat with bot)
