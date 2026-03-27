@@ -42,7 +42,7 @@ The repository includes a GitHub Actions workflow at `.github/workflows/docker-i
    docker compose up -d
    ```
 
-The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and sets the release description to `commit (<commit id>)`.
+The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and uses GitHub's standard `Generate release notes` output for the release description.
 
 The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.
 
