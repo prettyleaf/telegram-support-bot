@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS web_admin_passkeys CASCADE;
+DROP TABLE IF EXISTS web_admin_users CASCADE;

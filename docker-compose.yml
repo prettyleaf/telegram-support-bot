@@ -2,7 +2,10 @@ name: support-ticket-bot
 
 services:
   support-ticket-bot:
-    image: support-ticket-bot:${BOT_VERSION:?set BOT_VERSION in .env to the loaded image tag}
+    build:
+      context: .
+      dockerfile: Dockerfile
+#    image: support-ticket-bot:${BOT_VERSION:?set BOT_VERSION in .env to the loaded image tag}
     container_name: support-ticket-bot
     restart: unless-stopped
     env_file:
@@ -10,6 +13,10 @@ services:
     depends_on:
       support-ticket-postgres:
         condition: service_healthy
+#    expose:
+#      - "8080"
+    ports:
+      - "8080:8080"
     networks:
       - support-ticket-bot
 
@@ -28,6 +35,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - support-ticket-bot
+
+  support-ticket-valkey:
+    image: valkey/valkey:8-alpine
+    container_name: support-ticket-valkey
+    restart: unless-stopped
+    profiles:
+      - web-admin
+    command:
+      - valkey-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
     networks:
       - support-ticket-bot
 

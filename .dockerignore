@@ -1,0 +1,5 @@
+.git
+.github
+.env
+web/admin-ui/node_modules
+web/admin-ui/dist

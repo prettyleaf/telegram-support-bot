@@ -1,0 +1,364 @@
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --app-bg:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.96), transparent 30%),
+    linear-gradient(180deg, #fafafa 0%, #f4f4f5 55%, #e4e4e7 100%);
+  --shell-bg: rgba(255, 255, 255, 0.84);
+  --panel-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.96));
+  --panel-muted: rgba(244, 244, 245, 0.96);
+  --panel-border: rgba(15, 23, 42, 0.08);
+  --panel-border-strong: rgba(15, 23, 42, 0.14);
+  --panel-shadow: 0 24px 54px rgba(15, 23, 42, 0.08);
+  --shell-shadow: 0 24px 54px rgba(15, 23, 42, 0.06);
+  --text-primary: #111827;
+  --text-muted: #6b7280;
+  --text-subtle: #71717a;
+  --surface-strong: rgba(255, 255, 255, 0.92);
+}
+
+:root[data-mantine-color-scheme="dark"] {
+  color-scheme: dark;
+  --app-bg:
+    radial-gradient(circle at top, rgba(82, 82, 91, 0.18), transparent 28%),
+    linear-gradient(180deg, #09090b 0%, #09090b 48%, #020617 100%);
+  --shell-bg: rgba(9, 9, 11, 0.78);
+  --panel-bg: linear-gradient(180deg, rgba(24, 24, 27, 0.96), rgba(9, 9, 11, 0.95));
+  --panel-muted: rgba(24, 24, 27, 0.88);
+  --panel-border: rgba(63, 63, 70, 0.78);
+  --panel-border-strong: rgba(82, 82, 91, 0.92);
+  --panel-shadow: 0 30px 70px rgba(0, 0, 0, 0.38);
+  --shell-shadow: 0 30px 70px rgba(0, 0, 0, 0.28);
+  --text-primary: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --surface-strong: rgba(39, 39, 42, 0.92);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22%),
+    radial-gradient(circle at 0 0, rgba(255, 255, 255, 0.02), transparent 22%);
+}
+
+a {
+  color: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.hero-title {
+  color: var(--text-primary);
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+}
+
+.section-caption {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.glass-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    var(--panel-shadow);
+}
+
+.surface-muted {
+  background: var(--panel-muted);
+  border: 1px solid var(--panel-border);
+}
+
+.stat-card {
+  min-height: 132px;
+}
+
+.stat-card .mantine-Title-root {
+  font-size: clamp(1.9rem, 2.5vw, 2.55rem);
+}
+
+.auth-grid {
+  min-height: 100vh;
+  padding: 28px 0;
+}
+
+.auth-ambient {
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-ambient::before,
+.auth-ambient::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.auth-ambient::before {
+  width: 360px;
+  height: 360px;
+  top: -140px;
+  left: -120px;
+  background: rgba(255, 255, 255, 0.16);
+  filter: blur(16px);
+}
+
+.auth-ambient::after {
+  width: 260px;
+  height: 260px;
+  right: -70px;
+  bottom: -80px;
+  background: rgba(113, 113, 122, 0.14);
+  filter: blur(20px);
+}
+
+.auth-hero-panel,
+.auth-card {
+  min-height: 100%;
+}
+
+.auth-card {
+  backdrop-filter: blur(18px);
+}
+
+.app-header-frame,
+.app-navbar-frame {
+  height: 100%;
+  background: var(--shell-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shell-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.app-header-frame {
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+}
+
+.app-navbar-frame {
+  padding: 14px;
+}
+
+.app-brand {
+  padding: 14px 16px;
+}
+
+.identity-chip {
+  min-width: 190px;
+}
+
+.content-shell {
+  width: 100%;
+}
+
+.sidebar-link {
+  border-radius: 16px;
+  border: 1px solid transparent;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.sidebar-link:hover {
+  transform: translateY(-1px);
+}
+
+.sidebar-link[data-active="true"] {
+  background: var(--surface-strong);
+  border-color: var(--panel-border-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-note {
+  background: var(--panel-muted);
+}
+
+.message-bubble {
+  border-radius: 18px;
+  border: 1px solid var(--panel-border);
+  padding: 12px 14px;
+  background: var(--panel-muted);
+}
+
+.message-bubble.admin {
+  background: linear-gradient(180deg, rgba(24, 24, 27, 0.98), rgba(17, 24, 39, 0.9));
+}
+
+.message-bubble.user {
+  background: linear-gradient(180deg, rgba(24, 24, 27, 0.95), rgba(24, 24, 27, 0.92));
+}
+
+:root:not([data-mantine-color-scheme="dark"]) .message-bubble.admin {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.98));
+}
+
+:root:not([data-mantine-color-scheme="dark"]) .message-bubble.user {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(244, 244, 245, 0.96));
+}
+
+.ticket-list-item {
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.ticket-list-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--panel-border-strong);
+}
+
+.tight-scroll > div > div {
+  padding-bottom: 4px;
+}
+
+.compact-stack {
+  gap: 12px;
+}
+
+.mantine-Button-root,
+.mantine-ActionIcon-root,
+.mantine-Input-input,
+.mantine-Textarea-input,
+.mantine-PasswordInput-input,
+.mantine-SegmentedControl-root,
+.mantine-Badge-root,
+.mantine-Alert-root {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.mantine-Button-root {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.mantine-Input-input,
+.mantine-Textarea-input,
+.mantine-PasswordInput-input {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--panel-border);
+}
+
+.mantine-Input-input:focus,
+.mantine-Textarea-input:focus,
+.mantine-PasswordInput-input:focus {
+  border-color: var(--panel-border-strong);
+  box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.08);
+}
+
+.mantine-SegmentedControl-root {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--panel-border);
+}
+
+.mantine-SegmentedControl-indicator {
+  background: var(--surface-strong);
+  border: 1px solid var(--panel-border-strong);
+  box-shadow: none;
+}
+
+.mantine-Alert-root {
+  background: var(--panel-muted);
+  border: 1px solid var(--panel-border);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Button-root[data-variant="default"] {
+  background: rgba(24, 24, 27, 0.94);
+  border: 1px solid var(--panel-border-strong);
+  color: #fafafa;
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-ActionIcon-root[data-variant="default"] {
+  background: rgba(24, 24, 27, 0.94);
+  border: 1px solid var(--panel-border-strong);
+  color: #fafafa;
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Input-input,
+:root[data-mantine-color-scheme="dark"] .mantine-Textarea-input,
+:root[data-mantine-color-scheme="dark"] .mantine-PasswordInput-input {
+  background: rgba(9, 9, 11, 0.9);
+  border: 1px solid var(--panel-border);
+  color: #fafafa;
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Input-input::placeholder,
+:root[data-mantine-color-scheme="dark"] .mantine-Textarea-input::placeholder,
+:root[data-mantine-color-scheme="dark"] .mantine-PasswordInput-input::placeholder {
+  color: var(--text-subtle);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Input-input:focus,
+:root[data-mantine-color-scheme="dark"] .mantine-Textarea-input:focus,
+:root[data-mantine-color-scheme="dark"] .mantine-PasswordInput-input:focus {
+  border-color: rgba(161, 161, 170, 0.66);
+  box-shadow: 0 0 0 1px rgba(161, 161, 170, 0.16);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-SegmentedControl-root {
+  background: rgba(9, 9, 11, 0.84);
+  border: 1px solid var(--panel-border);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-SegmentedControl-indicator {
+  background: rgba(39, 39, 42, 0.98);
+  border: 1px solid var(--panel-border-strong);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Alert-root,
+:root[data-mantine-color-scheme="dark"] .mantine-Notification-root {
+  background: rgba(24, 24, 27, 0.98);
+  border: 1px solid var(--panel-border);
+}
+
+:root[data-mantine-color-scheme="dark"] .mantine-Badge-root[data-variant="outline"] {
+  border-color: var(--panel-border-strong);
+  color: #e4e4e7;
+}
+
+@media (max-width: 768px) {
+  .auth-grid {
+    min-height: auto;
+  }
+
+  .app-header-frame {
+    padding: 0 12px;
+  }
+
+  .app-brand {
+    padding: 12px 14px;
+  }
+}
