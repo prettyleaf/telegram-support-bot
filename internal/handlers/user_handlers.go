@@ -443,7 +443,7 @@ func (h *UserHandlers) HandleDevices(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	lang := h.getUserLanguage(ctx, userID)
-	h.openHWIDShortcut(ctx, b, update.Message.From, lang, 0, "")
+	h.openHWIDShortcut(ctx, b, update.Message.From, lang, 0, hwidEntrySourceMainMenu)
 }
 
 // HandleCancel handles the /cancel command
