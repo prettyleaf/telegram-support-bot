@@ -21,7 +21,10 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 
 ## Deployment Image Workflow
 
-The repository includes a GitHub Actions workflow at `.github/workflows/docker-image-tar.yml` that builds a Docker image tarball named `support-ticket-bot-<VERSION>.tar`.
+The repository includes a GitHub Actions workflow at `.github/workflows/docker-image-tar.yml` that builds two Docker image tarballs:
+
+- `support-ticket-bot-<VERSION>-linux-amd64.tar`
+- `support-ticket-bot-<VERSION>-linux-arm64.tar`
 
 ### Release flow
 
@@ -31,10 +34,14 @@ The repository includes a GitHub Actions workflow at `.github/workflows/docker-i
    git push origin 1.2.3
    ```
 2. Wait for the `Build Docker Image Tar` workflow to finish.
-3. Download `support-ticket-bot-1.2.3.tar` from the workflow artifacts or the GitHub Release assets.
+3. Download the tarball that matches the target server architecture from the workflow artifacts or the GitHub Release assets.
 4. Load the image on the target server:
    ```bash
-   docker load -i support-ticket-bot-1.2.3.tar
+   docker load -i support-ticket-bot-1.2.3-linux-amd64.tar
+   ```
+   For ARM64 servers, use:
+   ```bash
+   docker load -i support-ticket-bot-1.2.3-linux-arm64.tar
    ```
 5. Set `BOT_VERSION=1.2.3` in `.env`.
 6. Start or update the stack:
@@ -42,7 +49,7 @@ The repository includes a GitHub Actions workflow at `.github/workflows/docker-i
    docker compose up -d
    ```
 
-The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and sets the release description to `commit (<commit id>)`.
+The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and uses GitHub's standard `Generate release notes` output for the release description.
 
 The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.
 
