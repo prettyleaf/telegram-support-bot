@@ -89,16 +89,40 @@ func FormatTicketInfo(ticketNumber, status, priority string, userDisplay string)
 
 // EscapeHTML escapes HTML special characters
 func EscapeHTML(s string) string {
+	s = NormalizeUTF8(s)
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
 }
 
+// NormalizeUTF8 replaces invalid UTF-8 byte sequences with the Unicode replacement rune.
+func NormalizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
+
 // TruncateString truncates a string to a maximum length
 func TruncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	return TruncateStringWithSuffix(s, maxLen, "...")
+}
+
+// TruncateStringWithSuffix truncates a string by rune count and appends a suffix when needed.
+func TruncateStringWithSuffix(s string, maxLen int, suffix string) string {
+	if maxLen <= 0 {
+		return ""
+	}
+
+	s = NormalizeUTF8(s)
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+
+	suffix = NormalizeUTF8(suffix)
+	suffixRunes := []rune(suffix)
+	if len(suffixRunes) >= maxLen {
+		return string(suffixRunes[:maxLen])
+	}
+
+	return string(runes[:maxLen-len(suffixRunes)]) + suffix
 }

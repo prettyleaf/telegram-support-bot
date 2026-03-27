@@ -15,8 +15,42 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **Language Selection**: English and Russian user flows
 - **Ticket Stats**: View ticket activity summaries from admin commands
 - **Automatic Ticket Welcome**: Send a configurable first support reply on new tickets
+- **Business Hours Notice**: Optionally warn users when a ticket is opened outside support hours
 - **Onboarding Captcha**: Require a verification step on first bot launch, with generated or custom questions
 - **HWID Device Flow**: Detect HWID/device-limit questions, auto-escalate the ticket, and let users remove panel devices with a cooldown
+
+## Deployment Image Workflow
+
+The repository includes a GitHub Actions workflow at `.github/workflows/docker-image-tar.yml` that builds a Docker image tarball named `support-ticket-bot-<VERSION>.tar`.
+
+### Release flow
+
+1. Create and push a Git tag such as `1.2.3`:
+   ```bash
+   git tag 1.2.3
+   git push origin 1.2.3
+   ```
+2. Wait for the `Build Docker Image Tar` workflow to finish.
+3. Download `support-ticket-bot-1.2.3.tar` from the workflow artifacts or the GitHub Release assets.
+4. Load the image on the target server:
+   ```bash
+   docker load -i support-ticket-bot-1.2.3.tar
+   ```
+5. Set `BOT_VERSION=1.2.3` in `.env`.
+6. Start or update the stack:
+   ```bash
+   docker compose up -d
+   ```
+
+The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and sets the release description to `commit (<commit id>)`.
+
+The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.
+
+Minimum `.env` example for the image version:
+
+```env
+BOT_VERSION=1.2.3
+```
 
 ## Commands
 
@@ -87,6 +121,12 @@ hwid:
     - "delete device"
     - "device limit"
 
+business_hours:
+  enabled: true
+  timezone: "Europe/Moscow"
+  start: "10:00"
+  end: "19:00"
+
 messages:
   welcome: |
     👋 Welcome to Support!
@@ -101,6 +141,14 @@ messages:
     👋 <b>Здравствуйте!</b>
     Ваш тикет #{ticket_number} открыт.
     Вы можете отправить дополнительные детали в этом чате в любое время.
+  ticket_out_of_hours: |
+    🌙 <b>We are currently outside business hours.</b>
+    We received your ticket #{ticket_number} and will reply during working hours.
+    <b>Support hours:</b> <code>{working_hours}</code>.
+  ticket_out_of_hours_ru: |
+    🌙 <b>Сейчас нерабочее время.</b>
+    Мы получили ваш тикет #{ticket_number} и ответим в рабочие часы.
+    <b>Часы поддержки:</b> <code>{working_hours}</code>.
   ticket_closed: |
     🔒 Ticket #{ticket_number} has been closed.
 ```

@@ -110,6 +110,38 @@ You can send any extra details in this chat at any time.`
 	return strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
 }
 
+// GetTicketOutOfHoursMessageLang returns the automated out-of-hours notice in the specified language.
+func GetTicketOutOfHoursMessageLang(ticketNumber, workingHours, lang string) string {
+	var msg string
+	if lang == database.LangRussian {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketOutOfHoursRu
+		}
+		if msg == "" {
+			msg = `🌙 <b>Сейчас нерабочее время.</b>
+
+Мы получили ваш тикет #{ticket_number} и ответим в рабочие часы.
+
+<b>Часы поддержки:</b> <code>{working_hours}</code>.`
+		}
+	} else {
+		if config.YAMLCfg != nil {
+			msg = config.YAMLCfg.Messages.TicketOutOfHours
+		}
+		if msg == "" {
+			msg = `🌙 <b>We are currently outside business hours.</b>
+
+We received your ticket #{ticket_number} and will reply during working hours.
+
+<b>Support hours:</b> <code>{working_hours}</code>.`
+		}
+	}
+
+	msg = strings.ReplaceAll(msg, "{ticket_number}", ticketNumber)
+	msg = strings.ReplaceAll(msg, "{working_hours}", utils.EscapeHTML(workingHours))
+	return msg
+}
+
 // Ticket closed message
 func GetTicketClosedMessage(ticketNumber string) string {
 	return GetTicketClosedMessageLang(ticketNumber, "en")
@@ -194,7 +226,7 @@ func FormatUserTicketListLang(tickets []*database.Ticket, lang string) string {
 		statusEmoji := getStatusEmoji(t.Status)
 		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", statusEmoji, t.TicketNumber, t.Status))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -215,7 +247,7 @@ func FormatAdminTicketList(tickets []*database.Ticket) string {
 		priorityEmoji := getPriorityEmoji(t.Priority)
 		sb.WriteString(fmt.Sprintf("%s <b>#%s</b> - %s\n", priorityEmoji, t.TicketNumber, utils.EscapeHTML(t.GetDisplayName())))
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -241,7 +273,7 @@ func FormatAllTicketList(tickets []*database.Ticket, page, totalPages int) strin
 		}
 		sb.WriteString("\n")
 		if t.Subject != nil && *t.Subject != "" {
-			sb.WriteString(fmt.Sprintf("   📝 %s\n", truncate(utils.EscapeHTML(*t.Subject), 40)))
+			sb.WriteString(fmt.Sprintf("   📝 %s\n", utils.TruncateString(utils.EscapeHTML(*t.Subject), 40)))
 		}
 		sb.WriteString(fmt.Sprintf("   📅 %s\n\n", t.CreatedAt.Format("02 Jan 2006 15:04")))
 	}
@@ -569,11 +601,4 @@ func getPriorityEmoji(priority string) string {
 	default:
 		return "⚪"
 	}
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"remnafamily/internal/database"
+	"remnafamily/internal/utils"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -178,9 +179,7 @@ func TicketListKeyboard(tickets []*database.Ticket, page int, filter string, has
 		}
 
 		text := fmt.Sprintf("%s #%s - %s", statusEmoji, t.TicketNumber, t.GetDisplayName())
-		if len(text) > 40 {
-			text = text[:37] + "..."
-		}
+		text = utils.TruncateString(text, 40)
 
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("ticket:view:%d", t.ID)},
@@ -232,10 +231,7 @@ func UserTicketListKeyboard(tickets []*database.Ticket, lang string) *models.Inl
 
 		text := fmt.Sprintf("%s #%s", statusEmoji, t.TicketNumber)
 		if t.Subject != nil && *t.Subject != "" {
-			subject := *t.Subject
-			if len(subject) > 20 {
-				subject = subject[:17] + "..."
-			}
+			subject := utils.TruncateString(*t.Subject, 20)
 			text += " - " + subject
 		}
 
@@ -413,9 +409,7 @@ func CannedResponsesKeyboard(responses []*database.CannedResponse) *models.Inlin
 
 	for _, r := range responses {
 		text := fmt.Sprintf("/%s - %s", r.Shortcut, r.Title)
-		if len(text) > 40 {
-			text = text[:37] + "..."
-		}
+		text = utils.TruncateString(text, 40)
 
 		buttons = append(buttons, []models.InlineKeyboardButton{
 			{Text: text, CallbackData: fmt.Sprintf("canned:use:%s", r.Shortcut)},

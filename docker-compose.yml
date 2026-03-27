@@ -1,8 +1,8 @@
+name: support-ticket-bot
+
 services:
   support-ticket-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: support-ticket-bot:${BOT_VERSION:?set BOT_VERSION in .env to the loaded image tag}
     container_name: support-ticket-bot
     restart: unless-stopped
     env_file:

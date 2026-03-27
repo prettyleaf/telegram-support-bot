@@ -443,7 +443,7 @@ func (h *UserHandlers) HandleDevices(ctx context.Context, b *bot.Bot, update *mo
 	}
 
 	lang := h.getUserLanguage(ctx, userID)
-	h.openHWIDShortcut(ctx, b, update.Message.From, lang, 0, "")
+	h.openHWIDShortcut(ctx, b, update.Message.From, lang, 0, hwidEntrySourceMainMenu)
 }
 
 // HandleCancel handles the /cancel command
@@ -540,9 +540,7 @@ func (h *UserHandlers) HandleUserMessage(ctx context.Context, b *bot.Bot, update
 	subject := ""
 	if message.Text != "" {
 		subject = message.Text
-		if len(subject) > 100 {
-			subject = subject[:97] + "..."
-		}
+		subject = utils.TruncateString(subject, 100)
 	}
 
 	ticket, err = h.deps.TicketService.CreateTicket(ctx, b, userID, userName, userUsername, subject)
@@ -1853,10 +1851,7 @@ func buildHWIDCooldownLine(duration time.Duration, lang string) string {
 
 func truncateDeviceButtonLabel(device services.RemnawaveDevice, lang string) string {
 	label := formatDeviceLine(device, lang)
-	if len(label) <= 28 {
-		return label
-	}
-	return label[:25] + "..."
+	return utils.TruncateString(label, 28)
 }
 
 func valueOrEmpty(value *string) string {
@@ -1912,9 +1907,22 @@ func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ti
 	}
 
 	body := messages.GetTicketWelcomeMessageLang(ticket.TicketNumber, lang)
+	h.sendAutomatedTicketReply(ctx, b, ticket, body, "send automated ticket welcome", "save automated ticket welcome")
+
+	outOfHoursBody := h.buildTicketOutOfHoursNotice(ticket.TicketNumber, lang, time.Now())
+	if outOfHoursBody != "" {
+		h.sendAutomatedTicketReply(ctx, b, ticket, outOfHoursBody, "send out-of-hours ticket notice", "save out-of-hours ticket notice")
+	}
+}
+
+func (h *UserHandlers) sendAutomatedTicketReply(ctx context.Context, b *bot.Bot, ticket *database.Ticket, body, sendLogOp, saveLogOp string) {
+	if ticket == nil || strings.TrimSpace(body) == "" {
+		return
+	}
+
 	sentMsg, err := h.deps.TicketService.SendSupportTextToUser(ctx, b, ticket, body)
 	if err != nil {
-		utils.LogError("send automated ticket welcome", err)
+		utils.LogError(sendLogOp, err)
 		return
 	}
 
@@ -1930,8 +1938,25 @@ func (h *UserHandlers) sendAutoTicketWelcome(ctx context.Context, b *bot.Bot, ti
 	}
 
 	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {
-		utils.LogError("save automated ticket welcome", err)
+		utils.LogError(saveLogOp, err)
 	}
+}
+
+func (h *UserHandlers) buildTicketOutOfHoursNotice(ticketNumber, lang string, now time.Time) string {
+	if config.YAMLCfg == nil {
+		return ""
+	}
+
+	isWithinHours, err := config.YAMLCfg.BusinessHours.IsWithin(now)
+	if err != nil {
+		utils.LogError("evaluate business hours", err)
+		return ""
+	}
+	if isWithinHours {
+		return ""
+	}
+
+	return messages.GetTicketOutOfHoursMessageLang(ticketNumber, config.YAMLCfg.BusinessHours.ScheduleLabel(), lang)
 }
 
 func (h *UserHandlers) sendUserTicketDetails(ctx context.Context, b *bot.Bot, chatID int64, ticket *database.Ticket, lang string) {

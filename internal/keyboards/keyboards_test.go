@@ -2,6 +2,7 @@ package keyboards
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"remnafamily/internal/database"
 )
@@ -66,6 +67,27 @@ func TestUserTicketListKeyboardIncludesMainMenuBackButton(t *testing.T) {
 	}
 	if lastRow[0].CallbackData != "menu:main" {
 		t.Fatalf("expected main menu callback, got %q", lastRow[0].CallbackData)
+	}
+}
+
+func TestUserTicketListKeyboardTruncatesSubjectWithoutBreakingUTF8(t *testing.T) {
+	subject := "1234567890123456Жabcdefghijklmnopqrstuvwxyz"
+	keyboard := UserTicketListKeyboard([]*database.Ticket{
+		{
+			ID:           1,
+			TicketNumber: "42",
+			Status:       "open",
+			Subject:      &subject,
+		},
+	}, database.LangRussian)
+
+	if keyboard == nil || len(keyboard.InlineKeyboard) == 0 || len(keyboard.InlineKeyboard[0]) == 0 {
+		t.Fatalf("expected ticket button")
+	}
+
+	button := keyboard.InlineKeyboard[0][0]
+	if !utf8.ValidString(button.Text) {
+		t.Fatalf("expected valid UTF-8 button text, got %q", button.Text)
 	}
 }
 

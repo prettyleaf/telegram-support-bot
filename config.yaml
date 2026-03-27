@@ -75,6 +75,18 @@ hwid:
     - "выгнать устройство"
     - "выгнать 1 устройство"
 
+# Support business hours
+business_hours:
+  # Enable an automatic notice when a ticket is opened outside business hours
+  enabled: false
+
+  # Timezone used to evaluate the support schedule
+  timezone: "UTC"
+
+  # Start and end of the support day in HH:MM format
+  start: "09:00"
+  end: "18:00"
+
 # Message overrides (optional)
 messages:
   # Automated support reply sent immediately after a new ticket is opened
@@ -92,6 +104,22 @@ messages:
     Ваш тикет #{ticket_number} открыт. Наша команда поддержки скоро его посмотрит.
 
     Вы можете отправить дополнительные детали в этом чате в любое время.
+
+  # Automated notice sent when the ticket is opened outside configured business hours
+  ticket_out_of_hours: |
+    🌙 <b>We are currently outside business hours.</b>
+
+    We received your ticket #{ticket_number} and will reply during working hours.
+
+    <b>Support hours:</b> <code>{working_hours}</code>.
+
+  # Optional Russian override for the out-of-hours notice
+  ticket_out_of_hours_ru: |
+    🌙 <b>Сейчас нерабочее время.</b>
+
+    Мы получили ваш тикет #{ticket_number} и ответим в рабочие часы.
+
+    <b>Часы поддержки:</b> <code>{working_hours}</code>.
 
 # Database settings
 database:
