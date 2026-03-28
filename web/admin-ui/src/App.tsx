@@ -207,9 +207,9 @@ function priorityColor(priority: string) {
     case "low":
       return "gray";
     case "normal":
-      return "orange";
+      return "blue";
     case "high":
-      return "orange";
+      return "yellow";
     case "urgent":
       return "red";
     default:
@@ -287,13 +287,36 @@ function renderRichTextHTML(value?: string | null) {
 
 function messageMarkup(message: TicketMessage) {
   const content = renderRichTextHTML(message.messageText);
-  if (content) {
-    return { __html: content };
-  }
+  return content ? { __html: content } : null;
+}
 
-  return {
-    __html: message.hasMedia ? '<span class="formatted-empty">Attachment</span>' : '<span class="formatted-empty">No text</span>'
-  };
+function mediaMimeType(message: TicketMessage) {
+  return message.mediaMimeType?.trim().toLowerCase() ?? "";
+}
+
+function isImageAttachment(message: TicketMessage) {
+  const mimeType = mediaMimeType(message);
+  return mimeType.startsWith("image/") || message.mediaType === "photo";
+}
+
+function isVideoAttachment(message: TicketMessage) {
+  const mimeType = mediaMimeType(message);
+  return mimeType.startsWith("video/") || message.mediaType === "video" || message.mediaType === "video_note";
+}
+
+function isAudioAttachment(message: TicketMessage) {
+  const mimeType = mediaMimeType(message);
+  return mimeType.startsWith("audio/") || message.mediaType === "audio" || message.mediaType === "voice";
+}
+
+function attachmentLabel(message: TicketMessage) {
+  if (message.mediaFileName && message.mediaFileName.trim() !== "") {
+    return message.mediaFileName;
+  }
+  if (message.mediaType && message.mediaType.trim() !== "") {
+    return message.mediaType.replaceAll("_", " ");
+  }
+  return "Attachment";
 }
 
 function createDraftFileID() {
@@ -1622,24 +1645,71 @@ export default function App() {
                         <Stack gap="sm">
                           {ticketBusy ? <Loader size="sm" color="orange" /> : null}
 
-                          {ticketMessages.map((message) => (
-                            <Paper key={message.id} className={`message-bubble ${message.isAdmin ? "admin" : "user"}`} radius="xl">
-                              <Stack gap={6}>
-                                <Group justify="space-between">
-                                  <Text fw={700}>{displayMessageAuthor(message)}</Text>
-                                  <Text size="xs" c="dimmed">
-                                    {formatDateTime(message.createdAt)}
-                                  </Text>
-                                </Group>
-                                {message.mediaType ? (
-                                  <Badge size="sm" variant="light" color="gray" w="fit-content">
-                                    {message.mediaType}
-                                  </Badge>
-                                ) : null}
-                                <div className="formatted-message" dangerouslySetInnerHTML={messageMarkup(message)} />
-                              </Stack>
-                            </Paper>
-                          ))}
+                          {ticketMessages.map((message) => {
+                            const markup = messageMarkup(message);
+                            const mediaURL = message.mediaUrl?.trim() || "";
+                            const imagePreview = mediaURL !== "" && isImageAttachment(message);
+                            const videoPreview = mediaURL !== "" && isVideoAttachment(message);
+                            const audioPreview = mediaURL !== "" && isAudioAttachment(message);
+                            const fileAttachment = mediaURL !== "" && !imagePreview && !videoPreview && !audioPreview;
+
+                            return (
+                              <Paper key={message.id} className={`message-bubble ${message.isAdmin ? "admin" : "user"}`} radius="xl">
+                                <Stack gap={6}>
+                                  <Group justify="space-between">
+                                    <Text fw={700}>{displayMessageAuthor(message)}</Text>
+                                    <Text size="xs" c="dimmed">
+                                      {formatDateTime(message.createdAt)}
+                                    </Text>
+                                  </Group>
+
+                                  {imagePreview ? (
+                                    <a href={mediaURL} target="_blank" rel="noreferrer" className="message-media-link">
+                                      <img src={mediaURL} alt={attachmentLabel(message)} className="message-media message-media--image" />
+                                    </a>
+                                  ) : null}
+
+                                  {videoPreview ? (
+                                    <video className="message-media message-media--video" controls preload="metadata">
+                                      <source src={mediaURL} type={message.mediaMimeType ?? undefined} />
+                                    </video>
+                                  ) : null}
+
+                                  {audioPreview ? (
+                                    <audio className="message-media message-media--audio" controls preload="metadata">
+                                      <source src={mediaURL} type={message.mediaMimeType ?? undefined} />
+                                    </audio>
+                                  ) : null}
+
+                                  {fileAttachment ? (
+                                    <a href={mediaURL} target="_blank" rel="noreferrer" className="message-attachment-link">
+                                      <Group gap="sm" wrap="nowrap" className="message-attachment-card">
+                                        <ThemeIcon variant="light" color="orange" size="lg" radius="md">
+                                          <IconFile size={16} />
+                                        </ThemeIcon>
+                                        <Box className="message-attachment-copy">
+                                          <Text fw={600}>{attachmentLabel(message)}</Text>
+                                          <Text size="xs" c="dimmed">
+                                            {message.mediaMimeType ?? message.mediaType ?? "file"}
+                                          </Text>
+                                        </Box>
+                                      </Group>
+                                    </a>
+                                  ) : null}
+
+                                  {message.mediaType ? (
+                                    <Badge size="sm" variant="light" color="gray" w="fit-content">
+                                      {attachmentLabel(message)}
+                                    </Badge>
+                                  ) : null}
+
+                                  {markup ? <div className="formatted-message" dangerouslySetInnerHTML={markup} /> : null}
+                                  {!markup && !mediaURL && message.hasMedia ? <Text className="formatted-empty">Attachment</Text> : null}
+                                  {!markup && !message.hasMedia ? <Text className="formatted-empty">No text</Text> : null}
+                                </Stack>
+                              </Paper>
+                            );
+                          })}
 
                           {!ticketBusy && ticketMessages.length === 0 ? (
                             <Alert radius="lg" color="gray" variant="light">

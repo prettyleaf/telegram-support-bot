@@ -293,10 +293,16 @@ func (r *Repository) CreateTicketMessage(ctx context.Context, msg *TicketMessage
 	msg.SenderName = utils.SanitizeUTF8Ptr(msg.SenderName)
 	msg.SenderUsername = utils.SanitizeUTF8Ptr(msg.SenderUsername)
 	msg.MessageText = utils.SanitizeUTF8Ptr(msg.MessageText)
+	msg.MediaFileName = utils.SanitizeUTF8Ptr(msg.MediaFileName)
+	msg.MediaMimeType = utils.SanitizeUTF8Ptr(msg.MediaMimeType)
 
 	query := `
-		INSERT INTO ticket_messages (ticket_id, sender_id, sender_name, sender_username, is_admin, message_text, message_id, original_message_id, has_media, media_type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO ticket_messages (
+			ticket_id, sender_id, sender_name, sender_username, is_admin, message_text,
+			message_id, original_message_id, has_media, media_type, media_file_id,
+			media_file_name, media_mime_type
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at
 	`
 	return pool.QueryRow(ctx, query,
@@ -310,6 +316,9 @@ func (r *Repository) CreateTicketMessage(ctx context.Context, msg *TicketMessage
 		msg.OriginalMessageID,
 		msg.HasMedia,
 		msg.MediaType,
+		msg.MediaFileID,
+		msg.MediaFileName,
+		msg.MediaMimeType,
 	).Scan(&msg.ID, &msg.CreatedAt)
 }
 
@@ -328,7 +337,8 @@ func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*Ti
 		err := rows.Scan(
 			&msg.ID, &msg.TicketID, &msg.SenderID, &msg.SenderName, &msg.SenderUsername,
 			&msg.IsAdmin, &msg.MessageText, &msg.MessageID, &msg.OriginalMessageID,
-			&msg.HasMedia, &msg.MediaType, &msg.CreatedAt,
+			&msg.HasMedia, &msg.MediaType, &msg.MediaFileID, &msg.MediaFileName,
+			&msg.MediaMimeType, &msg.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -336,6 +346,27 @@ func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*Ti
 		messages = append(messages, &msg)
 	}
 	return messages, nil
+}
+
+// GetTicketMessage retrieves a single message by ticket and message ID.
+func (r *Repository) GetTicketMessage(ctx context.Context, ticketID int, messageID int) (*TicketMessage, error) {
+	query := `SELECT * FROM ticket_messages WHERE ticket_id = $1 AND id = $2 LIMIT 1`
+
+	var msg TicketMessage
+	err := pool.QueryRow(ctx, query, ticketID, messageID).Scan(
+		&msg.ID, &msg.TicketID, &msg.SenderID, &msg.SenderName, &msg.SenderUsername,
+		&msg.IsAdmin, &msg.MessageText, &msg.MessageID, &msg.OriginalMessageID,
+		&msg.HasMedia, &msg.MediaType, &msg.MediaFileID, &msg.MediaFileName,
+		&msg.MediaMimeType, &msg.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &msg, nil
 }
 
 // Banned Users Operations

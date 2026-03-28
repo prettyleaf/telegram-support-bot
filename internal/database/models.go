@@ -36,6 +36,9 @@ type TicketMessage struct {
 	OriginalMessageID *int64    `db:"original_message_id"`
 	HasMedia          bool      `db:"has_media"`
 	MediaType         *string   `db:"media_type"`
+	MediaFileID       *string   `db:"media_file_id"`
+	MediaFileName     *string   `db:"media_file_name"`
+	MediaMimeType     *string   `db:"media_mime_type"`
 	CreatedAt         time.Time `db:"created_at"`
 }
 

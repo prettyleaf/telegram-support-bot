@@ -3,12 +3,6 @@ import { Notifications } from "@mantine/notifications";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import "@fontsource/fraunces/400.css";
-import "@fontsource/fraunces/600.css";
-import "@fontsource/manrope/400.css";
-import "@fontsource/manrope/500.css";
-import "@fontsource/manrope/600.css";
-import "@fontsource/manrope/700.css";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
@@ -18,10 +12,11 @@ import "./styles.css";
 const theme = createTheme({
   primaryColor: "orange",
   defaultRadius: "md",
-  fontFamily: "Manrope, ui-sans-serif, system-ui, sans-serif",
+  fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   headings: {
-    fontFamily: "Fraunces, Georgia, serif",
-    fontWeight: "600"
+    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontWeight: "700"
   },
   components: {
     Button: {

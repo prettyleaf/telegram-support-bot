@@ -15,6 +15,7 @@ import (
 	"remnafamily/internal/services"
 	"remnafamily/internal/utils"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
@@ -58,6 +59,9 @@ type ticketMessageDTO struct {
 	MessageText    *string   `json:"messageText,omitempty"`
 	HasMedia       bool      `json:"hasMedia"`
 	MediaType      *string   `json:"mediaType,omitempty"`
+	MediaURL       *string   `json:"mediaUrl,omitempty"`
+	MediaFileName  *string   `json:"mediaFileName,omitempty"`
+	MediaMimeType  *string   `json:"mediaMimeType,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
@@ -224,6 +228,11 @@ func (s *Server) handleTicketMessages(w http.ResponseWriter, r *http.Request, ad
 
 	items := make([]ticketMessageDTO, 0, len(messages))
 	for _, message := range messages {
+		var mediaURL *string
+		if message.MediaFileID != nil && *message.MediaFileID != "" {
+			mediaURL = stringPtr(s.ticketMessageMediaURL(ticket.ID, message.ID))
+		}
+
 		items = append(items, ticketMessageDTO{
 			ID:             message.ID,
 			IsAdmin:        message.IsAdmin,
@@ -233,6 +242,9 @@ func (s *Server) handleTicketMessages(w http.ResponseWriter, r *http.Request, ad
 			MessageText:    message.MessageText,
 			HasMedia:       message.HasMedia,
 			MediaType:      message.MediaType,
+			MediaURL:       mediaURL,
+			MediaFileName:  message.MediaFileName,
+			MediaMimeType:  message.MediaMimeType,
 			CreatedAt:      message.CreatedAt,
 		})
 	}
@@ -325,12 +337,101 @@ func (s *Server) handleTicketReply(w http.ResponseWriter, r *http.Request, admin
 			MediaType:         stringPtr(mediaType),
 		}
 
+		mediaMeta := utils.ExtractTelegramMediaMetadata(userMessage)
+		if !mediaMeta.HasMedia {
+			mediaMeta = utils.ExtractTelegramMediaMetadata(threadMessage)
+		}
+		if mediaMeta.MediaType != "" {
+			ticketMessage.MediaType = stringPtr(mediaMeta.MediaType)
+		}
+		if mediaMeta.FileID != "" {
+			ticketMessage.MediaFileID = stringPtr(mediaMeta.FileID)
+		}
+		if mediaMeta.FileName != "" {
+			ticketMessage.MediaFileName = stringPtr(mediaMeta.FileName)
+		}
+		if mediaMeta.MimeType != "" {
+			ticketMessage.MediaMimeType = stringPtr(mediaMeta.MimeType)
+		}
+
 		if err := s.deps.TicketService.SaveMessage(r.Context(), ticketMessage); err != nil {
 			utils.LogError("save web admin upload message", err)
 		}
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleTicketMessageMedia(w http.ResponseWriter, r *http.Request, adminUser *database.WebAdminUser) {
+	_ = adminUser
+
+	ticket, err := s.ticketByRequest(r.Context(), r)
+	if err != nil || ticket == nil {
+		s.writeError(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+
+	messageID, err := strconv.Atoi(strings.TrimSpace(r.PathValue("messageID")))
+	if err != nil || messageID <= 0 {
+		s.writeError(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+
+	message, err := s.deps.DB.GetTicketMessage(r.Context(), ticket.ID, messageID)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to load ticket message")
+		return
+	}
+	if message == nil || !message.HasMedia || message.MediaFileID == nil || *message.MediaFileID == "" {
+		s.writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+
+	file, err := s.deps.Bot.GetFile(r.Context(), &bot.GetFileParams{FileID: *message.MediaFileID})
+	if err != nil {
+		utils.LogError("get telegram file", err)
+		s.writeError(w, http.StatusBadGateway, "failed to load telegram media")
+		return
+	}
+	if file == nil || strings.TrimSpace(file.FilePath) == "" {
+		s.writeError(w, http.StatusNotFound, "telegram file path not found")
+		return
+	}
+
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, s.deps.Bot.FileDownloadLink(file), nil)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "failed to prepare media request")
+		return
+	}
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		utils.LogError("download telegram file", err)
+		s.writeError(w, http.StatusBadGateway, "failed to download telegram media")
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		s.writeError(w, http.StatusBadGateway, "telegram media download failed")
+		return
+	}
+
+	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
+	if contentType == "" && message.MediaMimeType != nil {
+		contentType = strings.TrimSpace(*message.MediaMimeType)
+	}
+	if contentType == "" {
+		contentType = defaultTicketMediaContentType(message.MediaType, message.MediaMimeType)
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+
+	if _, err := io.Copy(w, response.Body); err != nil {
+		utils.LogError("stream telegram file", err)
+	}
 }
 
 func (s *Server) handleTicketPriority(w http.ResponseWriter, r *http.Request, adminUser *database.WebAdminUser) {
@@ -708,6 +809,35 @@ func exportSenderName(msg *database.TicketMessage) string {
 		return "Support"
 	}
 	return "User"
+}
+
+func (s *Server) ticketMessageMediaURL(ticketID, messageID int) string {
+	return fmt.Sprintf("/api/admin/tickets/%d/messages/%d/media", ticketID, messageID)
+}
+
+func defaultTicketMediaContentType(mediaType *string, mediaMimeType *string) string {
+	if mediaMimeType != nil && strings.TrimSpace(*mediaMimeType) != "" {
+		return strings.TrimSpace(*mediaMimeType)
+	}
+
+	if mediaType == nil {
+		return "application/octet-stream"
+	}
+
+	switch strings.TrimSpace(*mediaType) {
+	case "photo":
+		return "image/jpeg"
+	case "video", "video_note":
+		return "video/mp4"
+	case "voice":
+		return "audio/ogg"
+	case "audio":
+		return "audio/mpeg"
+	case "sticker":
+		return "image/webp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func exportMediaTag(msg *database.TicketMessage) string {

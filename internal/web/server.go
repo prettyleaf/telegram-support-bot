@@ -127,6 +127,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/tickets", s.withAdmin(s.handleTicketsList))
 	mux.HandleFunc("GET /api/admin/tickets/{id}", s.withAdmin(s.handleTicketDetails))
 	mux.HandleFunc("GET /api/admin/tickets/{id}/messages", s.withAdmin(s.handleTicketMessages))
+	mux.HandleFunc("GET /api/admin/tickets/{id}/messages/{messageID}/media", s.withAdmin(s.handleTicketMessageMedia))
 	mux.HandleFunc("POST /api/admin/tickets/{id}/reply", s.withAdmin(s.handleTicketReply))
 	mux.HandleFunc("POST /api/admin/tickets/{id}/priority", s.withAdmin(s.handleTicketPriority))
 	mux.HandleFunc("POST /api/admin/tickets/{id}/close", s.withAdmin(s.handleTicketClose))

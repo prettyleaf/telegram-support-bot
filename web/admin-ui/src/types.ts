@@ -72,6 +72,9 @@ export type TicketMessage = {
   messageText?: string | null;
   hasMedia: boolean;
   mediaType?: string | null;
+  mediaUrl?: string | null;
+  mediaFileName?: string | null;
+  mediaMimeType?: string | null;
   createdAt: string;
 };
 
