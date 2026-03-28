@@ -30,28 +30,33 @@ import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import {
   IconArrowRight,
+  IconBold,
+  IconCode,
   IconBrandGithub,
+  IconBlockquote,
   IconChartBar,
   IconDoorExit,
+  IconFile,
+  IconItalic,
   IconKey,
   IconMessageCircle,
   IconMessageCircleBolt,
   IconMoonStars,
+  IconPaperclip,
+  IconPhoto,
   IconRefresh,
   IconShieldLock,
   IconSparkles,
+  IconStrikethrough,
   IconSunHigh,
-  IconUserCancel
+  IconUnderline,
+  IconUserCancel,
+  IconX
 } from "@tabler/icons-react";
-import {
-  startAuthentication,
-  startRegistration,
-  type PublicKeyCredentialCreationOptionsJSON,
-  type PublicKeyCredentialRequestOptionsJSON
-} from "@simplewebauthn/browser";
-import { startTransition, useDeferredValue, useEffect, useEffectEvent, useState } from "react";
+import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
+import { startTransition, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { apiDelete, apiGet, apiPost } from "./api";
+import { apiDelete, apiGet, apiPost, apiPostForm } from "./api";
 import { TelegramLoginButton } from "./components/TelegramLoginButton";
 import type {
   BannedUser,
@@ -229,6 +234,111 @@ function displayMessageAuthor(message: TicketMessage) {
   return message.isAdmin ? "Support" : "User";
 }
 
+const richTextTagReplacements: Array<[string, string]> = [
+  ["&lt;b&gt;", "<b>"],
+  ["&lt;/b&gt;", "</b>"],
+  ["&lt;strong&gt;", "<strong>"],
+  ["&lt;/strong&gt;", "</strong>"],
+  ["&lt;i&gt;", "<i>"],
+  ["&lt;/i&gt;", "</i>"],
+  ["&lt;em&gt;", "<em>"],
+  ["&lt;/em&gt;", "</em>"],
+  ["&lt;u&gt;", "<u>"],
+  ["&lt;/u&gt;", "</u>"],
+  ["&lt;ins&gt;", "<ins>"],
+  ["&lt;/ins&gt;", "</ins>"],
+  ["&lt;s&gt;", "<s>"],
+  ["&lt;/s&gt;", "</s>"],
+  ["&lt;strike&gt;", "<strike>"],
+  ["&lt;/strike&gt;", "</strike>"],
+  ["&lt;del&gt;", "<del>"],
+  ["&lt;/del&gt;", "</del>"],
+  ["&lt;code&gt;", "<code>"],
+  ["&lt;/code&gt;", "</code>"],
+  ["&lt;pre&gt;", "<pre>"],
+  ["&lt;/pre&gt;", "</pre>"],
+  ["&lt;blockquote&gt;", "<blockquote>"],
+  ["&lt;/blockquote&gt;", "</blockquote>"],
+  ["&lt;tg-spoiler&gt;", "<tg-spoiler>"],
+  ["&lt;/tg-spoiler&gt;", "</tg-spoiler>"]
+];
+
+type DraftReplyFile = {
+  id: string;
+  file: File;
+};
+
+function escapeHTML(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function renderRichTextHTML(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  let safe = escapeHTML(value);
+  for (const [from, to] of richTextTagReplacements) {
+    safe = safe.replaceAll(from, to);
+  }
+
+  return safe.replaceAll("\r\n", "\n").replaceAll("\r", "\n").replaceAll("\n", "<br />");
+}
+
+function messageMarkup(message: TicketMessage) {
+  const content = renderRichTextHTML(message.messageText);
+  if (content) {
+    return { __html: content };
+  }
+
+  return {
+    __html: message.hasMedia ? '<span class="formatted-empty">Attachment</span>' : '<span class="formatted-empty">No text</span>'
+  };
+}
+
+function createDraftFileID() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `reply-file-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function fileExtensionForType(type: string) {
+  switch (type) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    case "video/mp4":
+      return "mp4";
+    default:
+      return "bin";
+  }
+}
+
+function normalizeReplyFile(file: File, index = 0) {
+  if (file.name && file.name.trim() !== "") {
+    return file;
+  }
+
+  const extension = fileExtensionForType(file.type);
+  return new File([file], `clipboard-${Date.now()}-${index + 1}.${extension}`, {
+    type: file.type || "application/octet-stream",
+    lastModified: file.lastModified || Date.now()
+  });
+}
+
+function attachmentIcon(file: File) {
+  if (file.type.startsWith("image/")) {
+    return IconPhoto;
+  }
+  return IconFile;
+}
+
 function showPasskeyError(mode: "login" | "registration", error: unknown) {
   if (!(error instanceof Error)) {
     notifications.show({
@@ -345,6 +455,7 @@ export default function App() {
   const [ticketMessages, setTicketMessages] = useState<TicketMessage[]>([]);
   const [ticketNotes, setTicketNotes] = useState<TicketNote[]>([]);
   const [replyText, setReplyText] = useState("");
+  const [replyFiles, setReplyFiles] = useState<DraftReplyFile[]>([]);
   const [noteText, setNoteText] = useState("");
   const [ticketActionBusy, setTicketActionBusy] = useState(false);
 
@@ -362,6 +473,8 @@ export default function App() {
   const [passkeys, setPasskeys] = useState<WebAdminPasskey[]>([]);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyName, setPasskeyName] = useState("Primary workstation");
+  const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const replyFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const syncRouteFromLocation = useEffectEvent(() => {
     const nextRoute = parseRoute(window.location.pathname, adminBasePath);
@@ -627,6 +740,15 @@ export default function App() {
   }, [activeSection, bootstrap?.authenticated, selectedTicketID]);
 
   useEffect(() => {
+    setReplyText("");
+    setReplyFiles([]);
+    setNoteText("");
+    if (replyFileInputRef.current) {
+      replyFileInputRef.current.value = "";
+    }
+  }, [selectedTicketID]);
+
+  useEffect(() => {
     if (!bootstrap?.authenticated) {
       return;
     }
@@ -685,6 +807,51 @@ export default function App() {
       setAuthBusy(false);
     }
   });
+
+  function appendReplyFiles(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+
+    setReplyFiles((current) => [
+      ...current,
+      ...files.map((file, index) => ({
+        id: createDraftFileID(),
+        file: normalizeReplyFile(file, index)
+      }))
+    ]);
+  }
+
+  function removeReplyFile(id: string) {
+    setReplyFiles((current) => current.filter((item) => item.id !== id));
+  }
+
+  function insertReplyMarkup(openTag: string, closeTag: string, placeholder: string) {
+    const input = replyInputRef.current;
+    if (!input) {
+      setReplyText((current) => `${current}${openTag}${placeholder}${closeTag}`);
+      return;
+    }
+
+    const selectionStart = input.selectionStart ?? replyText.length;
+    const selectionEnd = input.selectionEnd ?? replyText.length;
+    const selectedText = replyText.slice(selectionStart, selectionEnd);
+    const content = selectedText || placeholder;
+    const nextValue = `${replyText.slice(0, selectionStart)}${openTag}${content}${closeTag}${replyText.slice(selectionEnd)}`;
+
+    setReplyText(nextValue);
+    window.requestAnimationFrame(() => {
+      input.focus();
+      if (selectedText) {
+        const cursor = selectionStart + openTag.length + content.length + closeTag.length;
+        input.setSelectionRange(cursor, cursor);
+        return;
+      }
+
+      const start = selectionStart + openTag.length;
+      input.setSelectionRange(start, start + content.length);
+    });
+  }
 
   const filteredTickets =
     tickets?.items.filter((ticket) => {
@@ -772,16 +939,30 @@ export default function App() {
   }
 
   async function handleReplySubmit() {
-    if (!selectedTicketID || !replyText.trim()) {
+    if (!selectedTicketID || (!replyText.trim() && replyFiles.length === 0)) {
       return;
     }
 
     setTicketActionBusy(true);
     try {
-      await apiPost(`/api/admin/tickets/${selectedTicketID}/reply`, {
-        text: replyText.trim()
-      });
+      if (replyFiles.length > 0) {
+        const payload = new FormData();
+        payload.append("text", replyText.trim());
+        for (const item of replyFiles) {
+          payload.append("files", item.file, item.file.name);
+        }
+        await apiPostForm(`/api/admin/tickets/${selectedTicketID}/reply`, payload);
+      } else {
+        await apiPost(`/api/admin/tickets/${selectedTicketID}/reply`, {
+          text: replyText.trim()
+        });
+      }
+
       setReplyText("");
+      setReplyFiles([]);
+      if (replyFileInputRef.current) {
+        replyFileInputRef.current.value = "";
+      }
       notifications.show({
         color: "orange",
         title: "Reply sent",
@@ -1290,231 +1471,159 @@ export default function App() {
             ) : null}
 
             {activeSection === "tickets" ? (
-              <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
-                <Paper className="glass-panel" p="md" radius="xl">
+              <Box className="ticket-layout">
+                <Paper className="glass-panel ticket-queue-panel" p="md" radius="xl">
                   <Stack gap="md">
                     <Group justify="space-between" align="end">
                       <Title order={3} className="hero-title">
                         Tickets
                       </Title>
-                    <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTickets()}>
-                      <IconRefresh size={18} />
-                    </ActionIcon>
-                  </Group>
+                      <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTickets()}>
+                        <IconRefresh size={18} />
+                      </ActionIcon>
+                    </Group>
 
-                  <SegmentedControl
-                    value={ticketFilter}
-                    onChange={(value) => {
-                      setTicketPage(1);
-                      setTicketFilter(value);
-                    }}
-                    data={[
-                      { label: "Open", value: "open" },
-                      { label: "All", value: "all" },
-                      { label: "Closed", value: "closed" }
-                    ]}
-                  />
+                    <SegmentedControl
+                      value={ticketFilter}
+                      onChange={(value) => {
+                        setTicketPage(1);
+                        setTicketFilter(value);
+                      }}
+                      data={[
+                        { label: "Open", value: "open" },
+                        { label: "All", value: "all" },
+                        { label: "Closed", value: "closed" }
+                      ]}
+                    />
 
-                  <TextInput
-                    placeholder="Filter current page by number, user, or subject"
-                    value={ticketSearch}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      startTransition(() => setTicketSearch(value));
-                    }}
-                  />
+                    <TextInput
+                      placeholder="Filter current page by number, user, or subject"
+                      value={ticketSearch}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        startTransition(() => setTicketSearch(value));
+                      }}
+                    />
 
-                  <ScrollArea h={540} offsetScrollbars className="tight-scroll">
-                    <Stack gap="sm">
-                      {ticketsBusy && !tickets ? (
-                        <Center py="xl">
-                          <Loader color="orange" />
-                        </Center>
-                      ) : null}
+                    <ScrollArea offsetScrollbars className="ticket-queue-scroll tight-scroll">
+                      <Stack gap="sm">
+                        {ticketsBusy && !tickets ? (
+                          <Center py="xl">
+                            <Loader color="orange" />
+                          </Center>
+                        ) : null}
 
-                      {filteredTickets.map((ticket) => (
-                        <Card
-                          key={ticket.id}
-                          className="glass-panel ticket-list-item"
-                          onClick={() => openTicket(ticket.id)}
-                          radius="lg"
-                          withBorder
-                          shadow="xs"
-                          p="sm"
-                          style={{
-                            borderColor: selectedTicketID === ticket.id ? "rgba(161, 161, 170, 0.72)" : undefined,
-                            cursor: "pointer"
-                          }}
-                        >
-                          <Stack gap="xs">
-                            <Group justify="space-between" align="start">
-                              <Box>
-                                <Title order={4} className="hero-title">
-                                  #{ticket.ticketNumber}
-                                </Title>
-                                <Text fw={600}>{ticket.displayName}</Text>
-                                {ticket.subject ? (
-                                  <Text size="sm" c="dimmed">
-                                    {ticket.subject}
-                                  </Text>
-                                ) : null}
-                              </Box>
-                              <Stack gap={6} align="end">
-                                <Badge color={statusColor(ticket.status)} variant="light">
-                                  {ticket.status}
-                                </Badge>
-                                <Badge color={priorityColor(ticket.priority)} variant="dot">
-                                  {ticket.priority}
-                                </Badge>
-                              </Stack>
-                            </Group>
+                        {filteredTickets.map((ticket) => (
+                          <Card
+                            key={ticket.id}
+                            className="glass-panel ticket-list-item"
+                            onClick={() => openTicket(ticket.id)}
+                            radius="lg"
+                            withBorder
+                            shadow="xs"
+                            p="sm"
+                            style={{
+                              borderColor: selectedTicketID === ticket.id ? "rgba(232, 183, 122, 0.52)" : undefined,
+                              cursor: "pointer"
+                            }}
+                          >
+                            <Stack gap="xs">
+                              <Group justify="space-between" align="start">
+                                <Box>
+                                  <Title order={4} className="hero-title">
+                                    #{ticket.ticketNumber}
+                                  </Title>
+                                  <Text fw={600}>{ticket.displayName}</Text>
+                                  {ticket.subject ? (
+                                    <Text size="sm" c="dimmed">
+                                      {ticket.subject}
+                                    </Text>
+                                  ) : null}
+                                </Box>
+                                <Stack gap={6} align="end">
+                                  <Badge color={statusColor(ticket.status)} variant="light">
+                                    {ticket.status}
+                                  </Badge>
+                                  <Badge color={priorityColor(ticket.priority)} variant="dot">
+                                    {ticket.priority}
+                                  </Badge>
+                                </Stack>
+                              </Group>
 
-                            <Group justify="space-between" align="center">
-                              <Text size="sm" c="dimmed">
-                                Updated {formatDateTime(ticket.updatedAt)}
-                              </Text>
-                              <Button
-                                variant="subtle"
-                                color="gray"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openTicket(ticket.id);
-                                }}
-                              >
-                                Open
-                              </Button>
-                            </Group>
-                          </Stack>
-                        </Card>
-                      ))}
+                              <Group justify="space-between" align="center">
+                                <Text size="sm" c="dimmed">
+                                  Updated {formatDateTime(ticket.updatedAt)}
+                                </Text>
+                                <Button
+                                  variant="subtle"
+                                  color="gray"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openTicket(ticket.id);
+                                  }}
+                                >
+                                  Open
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </Card>
+                        ))}
 
-                      {!ticketsBusy && filteredTickets.length === 0 ? (
-                        <Alert radius="lg" color="gray" variant="light" title="Nothing on this page">
-                          Try another filter or go to the next page.
-                        </Alert>
-                      ) : null}
-                    </Stack>
-                  </ScrollArea>
+                        {!ticketsBusy && filteredTickets.length === 0 ? (
+                          <Alert radius="lg" color="gray" variant="light" title="Nothing on this page">
+                            Try another filter or go to the next page.
+                          </Alert>
+                        ) : null}
+                      </Stack>
+                    </ScrollArea>
 
-                  <Group justify="space-between">
-                    <Button variant="light" onClick={() => setTicketPage((value) => Math.max(1, value - 1))} disabled={ticketPage <= 1}>
-                      Previous
-                    </Button>
-                    <Text size="sm" c="dimmed">
-                      Page {tickets?.page ?? ticketPage} / {tickets?.totalPages ?? 1}
-                    </Text>
-                    <Button
-                      variant="light"
-                      onClick={() => setTicketPage((value) => value + 1)}
-                      disabled={tickets ? ticketPage >= tickets.totalPages : false}
-                    >
-                      Next
-                    </Button>
-                  </Group>
-                </Stack>
+                    <Group justify="space-between">
+                      <Button variant="light" onClick={() => setTicketPage((value) => Math.max(1, value - 1))} disabled={ticketPage <= 1}>
+                        Previous
+                      </Button>
+                      <Text size="sm" c="dimmed">
+                        Page {tickets?.page ?? ticketPage} / {tickets?.totalPages ?? 1}
+                      </Text>
+                      <Button
+                        variant="light"
+                        onClick={() => setTicketPage((value) => value + 1)}
+                        disabled={tickets ? ticketPage >= tickets.totalPages : false}
+                      >
+                        Next
+                      </Button>
+                    </Group>
+                  </Stack>
                 </Paper>
 
-                <Stack gap="md">
-                  <Paper className="glass-panel" p="md" radius="xl">
+                <Stack gap="md" className="ticket-workspace">
+                  <Paper className="glass-panel ticket-thread-panel" p="md" radius="xl">
                     <Group justify="space-between" align="start">
                       <Title order={3} className="hero-title">
-                        {selectedTicket ? `#${selectedTicket.ticketNumber}` : "Workspace"}
+                        {selectedTicket ? `Chat · #${selectedTicket.ticketNumber}` : "Chat"}
                       </Title>
-                    {selectedTicketID ? (
-                      <Group gap="xs">
-                        <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTicketWorkspace(selectedTicketID)}>
-                          <IconRefresh size={18} />
-                        </ActionIcon>
-                        <Button component="a" href={`/api/admin/tickets/${selectedTicketID}/export`} variant="default" color="gray">
-                          Export HTML
-                        </Button>
-                      </Group>
-                    ) : null}
-                  </Group>
+                      {selectedTicketID ? (
+                        <Group gap="xs">
+                          <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTicketWorkspace(selectedTicketID)}>
+                            <IconRefresh size={18} />
+                          </ActionIcon>
+                          <Button component="a" href={`/api/admin/tickets/${selectedTicketID}/export`} variant="default" color="gray">
+                            Export HTML
+                          </Button>
+                        </Group>
+                      ) : null}
+                    </Group>
 
-                  {!selectedTicket ? (
-                    <Alert mt="md" radius="lg" color="gray" variant="light">
-                      Pick a ticket from the queue to view the full timeline, notes, and reply composer.
-                    </Alert>
-                  ) : (
-                    <Stack mt="sm" gap="sm">
-                      <Group gap="xs">
-                        <Badge color={statusColor(selectedTicket.status)} variant="light">
-                          {selectedTicket.status}
-                        </Badge>
-                        <Badge color={priorityColor(selectedTicket.priority)} variant="dot">
-                          {selectedTicket.priority}
-                        </Badge>
-                        <Badge variant="outline">User ID {selectedTicket.userId}</Badge>
-                      </Group>
-
-                      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-                        <TextInput label="Subject" value={selectedTicket.subject ?? "No subject"} readOnly />
-                        <TextInput label="Updated" value={formatDateTime(selectedTicket.updatedAt)} readOnly />
-                      </SimpleGrid>
-
-                      <SegmentedControl
-                        fullWidth
-                        value={selectedTicket.priority}
-                        onChange={(value) => void updatePriority(value)}
-                        data={[
-                          { label: "Low", value: "low" },
-                          { label: "Normal", value: "normal" },
-                          { label: "High", value: "high" },
-                          { label: "Urgent", value: "urgent" }
-                        ]}
-                        disabled={ticketActionBusy}
-                      />
-
-                      <Group>
-                        <Button
-                          variant="light"
-                          color={selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "orange" : "red"}
-                          loading={ticketActionBusy}
-                          onClick={() =>
-                            void toggleTicketStatus(
-                              selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "reopen" : "close"
-                            )
-                          }
-                        >
-                          {selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "Reopen" : "Close"}
-                        </Button>
-                      </Group>
-
-                      <Textarea
-                        label="Reply to user"
-                        minRows={3}
-                        placeholder="Write the next support message"
-                        value={replyText}
-                        onChange={(event) => setReplyText(event.currentTarget.value)}
-                      />
-                      <Group justify="flex-end">
-                        <Button loading={ticketActionBusy} onClick={handleReplySubmit}>
-                          Send reply
-                        </Button>
-                      </Group>
-                    </Stack>
-                  )}
-                  </Paper>
-
-                <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
-                  <Paper className="glass-panel" p="md" radius="xl">
-                    <Stack gap="md">
-                      <Group justify="space-between">
-                        <Title order={4} className="hero-title">
-                          Timeline
-                        </Title>
-                        {ticketBusy ? <Loader size="sm" color="orange" /> : null}
-                      </Group>
-
-                      <ScrollArea h={320} offsetScrollbars className="tight-scroll">
+                    {!selectedTicket ? (
+                      <Alert mt="md" radius="lg" color="gray" variant="light">
+                        Pick a ticket from the queue to open the timeline and reply workspace.
+                      </Alert>
+                    ) : (
+                      <ScrollArea offsetScrollbars className="ticket-thread-scroll tight-scroll" mt="sm">
                         <Stack gap="sm">
+                          {ticketBusy ? <Loader size="sm" color="orange" /> : null}
+
                           {ticketMessages.map((message) => (
-                            <Paper
-                              key={message.id}
-                              className={`message-bubble ${message.isAdmin ? "admin" : "user"}`}
-                              radius="xl"
-                            >
+                            <Paper key={message.id} className={`message-bubble ${message.isAdmin ? "admin" : "user"}`} radius="xl">
                               <Stack gap={6}>
                                 <Group justify="space-between">
                                   <Text fw={700}>{displayMessageAuthor(message)}</Text>
@@ -1527,7 +1636,7 @@ export default function App() {
                                     {message.mediaType}
                                   </Badge>
                                 ) : null}
-                                <Text style={{ whiteSpace: "pre-wrap" }}>{message.messageText || "No text"}</Text>
+                                <div className="formatted-message" dangerouslySetInnerHTML={messageMarkup(message)} />
                               </Stack>
                             </Paper>
                           ))}
@@ -1539,58 +1648,224 @@ export default function App() {
                           ) : null}
                         </Stack>
                       </ScrollArea>
-                    </Stack>
+                    )}
                   </Paper>
 
-                  <Paper className="glass-panel" p="md" radius="xl">
-                    <Stack gap="md">
-                      <Title order={4} className="hero-title">
-                        Internal notes
-                      </Title>
+                  <Paper className="glass-panel ticket-details-panel" p="md" radius="xl">
+                    {!selectedTicket ? (
+                      <Alert radius="lg" color="gray" variant="light">
+                        Ticket details, reply tools, and internal notes appear here once you select a conversation.
+                      </Alert>
+                    ) : (
+                      <Stack gap="md">
+                        <Group justify="space-between" align="start">
+                          <Title order={4} className="hero-title">
+                            Ticket details
+                          </Title>
+                          <Badge variant="outline">Thread {selectedTicket.threadId}</Badge>
+                        </Group>
 
-                      <Textarea
-                        label="Add note"
-                        minRows={3}
-                        placeholder="Private context for the support team"
-                        value={noteText}
-                        onChange={(event) => setNoteText(event.currentTarget.value)}
-                      />
-                      <Group justify="flex-end">
-                        <Button loading={ticketActionBusy} variant="default" color="gray" onClick={addNote}>
-                          Save note
-                        </Button>
-                      </Group>
+                        <Group gap="xs">
+                          <Badge color={statusColor(selectedTicket.status)} variant="light">
+                            {selectedTicket.status}
+                          </Badge>
+                          <Badge color={priorityColor(selectedTicket.priority)} variant="dot">
+                            {selectedTicket.priority}
+                          </Badge>
+                          <Badge variant="outline">User ID {selectedTicket.userId}</Badge>
+                        </Group>
 
-                      <Divider />
+                        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
+                          <TextInput label="Subject" value={selectedTicket.subject ?? "No subject"} readOnly />
+                          <TextInput label="Updated" value={formatDateTime(selectedTicket.updatedAt)} readOnly />
+                        </SimpleGrid>
 
-                      <ScrollArea h={220} offsetScrollbars className="tight-scroll">
-                        <Stack gap="sm">
-                          {ticketNotes.map((note) => (
-                            <Paper key={note.id} className="glass-panel" radius="lg" p="sm">
-                              <Stack gap={6}>
-                                <Group justify="space-between">
-                                  <Text fw={700}>{note.adminName || `Admin ${note.adminId}`}</Text>
-                                  <Text size="xs" c="dimmed">
-                                    {formatDateTime(note.createdAt)}
-                                  </Text>
-                                </Group>
-                                <Text style={{ whiteSpace: "pre-wrap" }}>{note.noteText}</Text>
-                              </Stack>
-                            </Paper>
-                          ))}
+                        <SegmentedControl
+                          fullWidth
+                          value={selectedTicket.priority}
+                          onChange={(value) => void updatePriority(value)}
+                          data={[
+                            { label: "Low", value: "low" },
+                            { label: "Normal", value: "normal" },
+                            { label: "High", value: "high" },
+                            { label: "Urgent", value: "urgent" }
+                          ]}
+                          disabled={ticketActionBusy}
+                        />
 
-                          {!ticketBusy && ticketNotes.length === 0 ? (
-                            <Alert radius="lg" color="gray" variant="light">
-                              No internal notes yet.
-                            </Alert>
+                        <Group>
+                          <Button
+                            variant="light"
+                            color={selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "orange" : "red"}
+                            loading={ticketActionBusy}
+                            onClick={() =>
+                              void toggleTicketStatus(
+                                selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "reopen" : "close"
+                              )
+                            }
+                          >
+                            {selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "Reopen" : "Close"}
+                          </Button>
+                        </Group>
+
+                        <Divider />
+
+                        <Stack gap="xs">
+                          <Text className="section-caption">Reply composer</Text>
+                          <Group gap="xs" className="reply-toolbar">
+                            <ActionIcon variant="default" color="gray" onClick={() => insertReplyMarkup("<b>", "</b>", "bold text")} aria-label="Bold">
+                              <IconBold size={16} />
+                            </ActionIcon>
+                            <ActionIcon variant="default" color="gray" onClick={() => insertReplyMarkup("<i>", "</i>", "italic text")} aria-label="Italic">
+                              <IconItalic size={16} />
+                            </ActionIcon>
+                            <ActionIcon variant="default" color="gray" onClick={() => insertReplyMarkup("<u>", "</u>", "underlined text")} aria-label="Underline">
+                              <IconUnderline size={16} />
+                            </ActionIcon>
+                            <ActionIcon variant="default" color="gray" onClick={() => insertReplyMarkup("<s>", "</s>", "crossed text")} aria-label="Strikethrough">
+                              <IconStrikethrough size={16} />
+                            </ActionIcon>
+                            <ActionIcon variant="default" color="gray" onClick={() => insertReplyMarkup("<code>", "</code>", "code")} aria-label="Code">
+                              <IconCode size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="default"
+                              color="gray"
+                              onClick={() => insertReplyMarkup("<blockquote>", "</blockquote>", "quoted text")}
+                              aria-label="Quote"
+                            >
+                              <IconBlockquote size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="default"
+                              color="gray"
+                              onClick={() => insertReplyMarkup("<tg-spoiler>", "</tg-spoiler>", "spoiler")}
+                              aria-label="Spoiler"
+                            >
+                              <IconSparkles size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="default"
+                              color="orange"
+                              onClick={() => replyFileInputRef.current?.click()}
+                              aria-label="Attach files"
+                            >
+                              <IconPaperclip size={16} />
+                            </ActionIcon>
+                          </Group>
+
+                          <input
+                            ref={replyFileInputRef}
+                            type="file"
+                            hidden
+                            multiple
+                            onChange={(event) => {
+                              appendReplyFiles(Array.from(event.currentTarget.files ?? []));
+                              event.currentTarget.value = "";
+                            }}
+                          />
+
+                          {replyFiles.length > 0 ? (
+                            <Group gap="xs" className="reply-attachment-list">
+                              {replyFiles.map((item) => {
+                                const AttachmentIcon = attachmentIcon(item.file);
+                                return (
+                                  <Paper key={item.id} className="reply-attachment-chip" radius="xl">
+                                    <Group gap={8} wrap="nowrap">
+                                      <AttachmentIcon size={16} />
+                                      <Text size="sm" className="reply-attachment-name">
+                                        {item.file.name}
+                                      </Text>
+                                      <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => removeReplyFile(item.id)}>
+                                        <IconX size={14} />
+                                      </ActionIcon>
+                                    </Group>
+                                  </Paper>
+                                );
+                              })}
+                            </Group>
                           ) : null}
+
+                          <Textarea
+                            ref={replyInputRef}
+                            label="Reply to user"
+                            minRows={5}
+                            placeholder="Write the next support message. HTML tags like <b>, <i>, <code>, <blockquote>, and <tg-spoiler> are supported."
+                            value={replyText}
+                            onChange={(event) => setReplyText(event.currentTarget.value)}
+                            onPaste={(event) => {
+                              const files = Array.from(event.clipboardData.items)
+                                .map((item) => item.getAsFile())
+                                .filter((file): file is File => file !== null);
+
+                              if (files.length > 0) {
+                                event.preventDefault();
+                                appendReplyFiles(files);
+                              }
+                            }}
+                          />
+
+                          <Group justify="space-between" align="center">
+                            <Text size="xs" c="dimmed">
+                              Paste screenshots directly from the clipboard or use the paperclip button.
+                            </Text>
+                            <Button loading={ticketActionBusy} onClick={handleReplySubmit}>
+                              Send reply
+                            </Button>
+                          </Group>
                         </Stack>
-                      </ScrollArea>
-                    </Stack>
+
+                        <Divider />
+
+                        <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
+                          <Stack gap="sm">
+                            <Text className="section-caption">Internal notes</Text>
+                            <Textarea
+                              label="Add note"
+                              minRows={4}
+                              placeholder="Private context for the support team"
+                              value={noteText}
+                              onChange={(event) => setNoteText(event.currentTarget.value)}
+                            />
+                            <Group justify="flex-end">
+                              <Button loading={ticketActionBusy} variant="default" color="gray" onClick={addNote}>
+                                Save note
+                              </Button>
+                            </Group>
+                          </Stack>
+
+                          <Stack gap="sm">
+                            <Text className="section-caption">Recent notes</Text>
+                            <ScrollArea offsetScrollbars className="ticket-notes-scroll tight-scroll">
+                              <Stack gap="sm">
+                                {ticketNotes.map((note) => (
+                                  <Paper key={note.id} className="glass-panel" radius="lg" p="sm">
+                                    <Stack gap={6}>
+                                      <Group justify="space-between">
+                                        <Text fw={700}>{note.adminName || `Admin ${note.adminId}`}</Text>
+                                        <Text size="xs" c="dimmed">
+                                          {formatDateTime(note.createdAt)}
+                                        </Text>
+                                      </Group>
+                                      <Text style={{ whiteSpace: "pre-wrap" }}>{note.noteText}</Text>
+                                    </Stack>
+                                  </Paper>
+                                ))}
+
+                                {!ticketBusy && ticketNotes.length === 0 ? (
+                                  <Alert radius="lg" color="gray" variant="light">
+                                    No internal notes yet.
+                                  </Alert>
+                                ) : null}
+                              </Stack>
+                            </ScrollArea>
+                          </Stack>
+                        </SimpleGrid>
+                      </Stack>
+                    )}
                   </Paper>
-                </SimpleGrid>
                 </Stack>
-              </SimpleGrid>
+              </Box>
             ) : null}
 
             {activeSection === "canned" ? (

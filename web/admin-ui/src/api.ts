@@ -22,12 +22,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(path, {
     credentials: "same-origin",
     ...init,
     headers: {
       Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(!isFormData && init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {})
     }
   });
@@ -43,6 +44,13 @@ export function apiPost<T>(path: string, body?: unknown) {
   return apiRequest<T>(path, {
     method: "POST",
     body: body === undefined ? undefined : JSON.stringify(body)
+  });
+}
+
+export function apiPostForm<T>(path: string, body: FormData) {
+  return apiRequest<T>(path, {
+    method: "POST",
+    body
   });
 }
 

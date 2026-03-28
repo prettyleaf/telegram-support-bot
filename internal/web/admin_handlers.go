@@ -1,8 +1,10 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,7 +12,10 @@ import (
 
 	"remnafamily/internal/config"
 	"remnafamily/internal/database"
+	"remnafamily/internal/services"
 	"remnafamily/internal/utils"
+
+	"github.com/go-telegram/bot/models"
 )
 
 type dashboardSummaryDTO struct {
@@ -246,35 +251,83 @@ func (s *Server) handleTicketReply(w http.ResponseWriter, r *http.Request, admin
 		return
 	}
 
-	var req replyRequest
-	if err := s.readJSON(r, &req); err != nil || strings.TrimSpace(req.Text) == "" {
-		s.writeError(w, http.StatusBadRequest, "reply text is required")
-		return
-	}
-
-	body := utils.EscapeHTML(strings.TrimSpace(req.Text))
-	sentMessage, err := s.deps.TicketService.SendSupportTextToUser(r.Context(), s.deps.Bot, ticket, body)
+	text, uploads, err := readTicketReplyPayload(r)
 	if err != nil {
-		utils.LogError("send support reply from web", err)
-		s.writeError(w, http.StatusInternalServerError, "failed to send message to user")
+		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	body := utils.SanitizeTelegramHTML(text)
 	senderName, senderUsername := adminSenderIdentity(adminUser)
-	originalMessageID := int64(0)
-	ticketMessage := &database.TicketMessage{
-		TicketID:          ticket.ID,
-		SenderID:          webAdminActorID(adminUser.ID),
-		SenderName:        senderName,
-		SenderUsername:    senderUsername,
-		IsAdmin:           true,
-		MessageText:       &req.Text,
-		MessageID:         func() *int64 { id := int64(sentMessage.ID); return &id }(),
-		OriginalMessageID: &originalMessageID,
+	if len(uploads) == 0 {
+		userMessage, threadMessage, err := s.deps.TicketService.SendSupportHTMLReply(
+			r.Context(),
+			s.deps.Bot,
+			ticket,
+			body,
+			adminUser.DisplayName,
+		)
+		if err != nil {
+			utils.LogError("send support reply from web", err)
+			s.writeError(w, http.StatusInternalServerError, "failed to deliver reply")
+			return
+		}
+
+		ticketMessage := &database.TicketMessage{
+			TicketID:          ticket.ID,
+			SenderID:          webAdminActorID(adminUser.ID),
+			SenderName:        senderName,
+			SenderUsername:    senderUsername,
+			IsAdmin:           true,
+			MessageText:       stringPtr(body),
+			MessageID:         messageIDPtr(userMessage),
+			OriginalMessageID: messageIDPtr(threadMessage),
+		}
+
+		if err := s.deps.TicketService.SaveMessage(r.Context(), ticketMessage); err != nil {
+			utils.LogError("save web admin message", err)
+		}
+
+		s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
 	}
 
-	if err := s.deps.TicketService.SaveMessage(r.Context(), ticketMessage); err != nil {
-		utils.LogError("save web admin message", err)
+	for index, upload := range uploads {
+		caption := ""
+		if index == 0 {
+			caption = body
+		}
+
+		userMessage, threadMessage, mediaType, err := s.deps.TicketService.SendSupportUploadReply(
+			r.Context(),
+			s.deps.Bot,
+			ticket,
+			upload,
+			caption,
+			adminUser.DisplayName,
+		)
+		if err != nil {
+			utils.LogError("send support upload from web", err)
+			s.writeError(w, http.StatusInternalServerError, "failed to deliver attachment")
+			return
+		}
+
+		ticketMessage := &database.TicketMessage{
+			TicketID:          ticket.ID,
+			SenderID:          webAdminActorID(adminUser.ID),
+			SenderName:        senderName,
+			SenderUsername:    senderUsername,
+			IsAdmin:           true,
+			MessageText:       stringPtr(caption),
+			MessageID:         messageIDPtr(userMessage),
+			OriginalMessageID: messageIDPtr(threadMessage),
+			HasMedia:          true,
+			MediaType:         stringPtr(mediaType),
+		}
+
+		if err := s.deps.TicketService.SaveMessage(r.Context(), ticketMessage); err != nil {
+			utils.LogError("save web admin upload message", err)
+		}
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -622,7 +675,10 @@ func buildTicketHistoryHTML(ticket *database.Ticket, messages []*database.Ticket
 		}
 		text := ""
 		if msg.MessageText != nil {
-			text = html.EscapeString(*msg.MessageText)
+			text = utils.RichTextHTMLForDisplay(*msg.MessageText)
+		}
+		if text == "" && msg.HasMedia {
+			text = "<i>[attachment]</i>"
 		}
 		if text == "" {
 			text = "<i>[no text]</i>"
@@ -659,6 +715,86 @@ func exportMediaTag(msg *database.TicketMessage) string {
 		return ""
 	}
 	return fmt.Sprintf(" <span class=\"tag\">%s</span>", html.EscapeString(*msg.MediaType))
+}
+
+const maxTicketReplyUploadBytes = 20 << 20
+
+func readTicketReplyPayload(r *http.Request) (string, []services.SupportUpload, error) {
+	if r == nil {
+		return "", nil, fmt.Errorf("invalid request")
+	}
+
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(maxTicketReplyUploadBytes * 2); err != nil {
+			return "", nil, fmt.Errorf("invalid attachment payload")
+		}
+
+		text := strings.TrimSpace(r.FormValue("text"))
+		files := r.MultipartForm.File["files"]
+		uploads := make([]services.SupportUpload, 0, len(files))
+		for _, header := range files {
+			if header == nil || header.Size == 0 {
+				continue
+			}
+
+			file, err := header.Open()
+			if err != nil {
+				return "", nil, fmt.Errorf("failed to read attachment")
+			}
+
+			data, readErr := io.ReadAll(io.LimitReader(file, maxTicketReplyUploadBytes+1))
+			_ = file.Close()
+			if readErr != nil {
+				return "", nil, fmt.Errorf("failed to read attachment")
+			}
+			if len(data) > maxTicketReplyUploadBytes {
+				return "", nil, fmt.Errorf("attachments must be 20 MB or smaller")
+			}
+			if len(data) == 0 {
+				continue
+			}
+
+			detectedType := strings.TrimSpace(header.Header.Get("Content-Type"))
+			if detectedType == "" {
+				detectedType = http.DetectContentType(data)
+			}
+
+			uploads = append(uploads, services.SupportUpload{
+				Filename:    header.Filename,
+				ContentType: detectedType,
+				Data:        data,
+			})
+		}
+
+		if text == "" && len(uploads) == 0 {
+			return "", nil, fmt.Errorf("reply text or attachment is required")
+		}
+		return text, uploads, nil
+	}
+
+	var req replyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Text) == "" {
+		return "", nil, fmt.Errorf("reply text or attachment is required")
+	}
+
+	return strings.TrimSpace(req.Text), nil, nil
+}
+
+func stringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func messageIDPtr(message *models.Message) *int64 {
+	if message == nil {
+		return nil
+	}
+	id := int64(message.ID)
+	return &id
 }
 
 func bannedUserDisplayName(user *database.BannedUser) string {
