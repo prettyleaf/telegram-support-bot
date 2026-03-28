@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,11 +26,23 @@ func newStateStore(cfg config.ValkeyConfig) stateStore {
 		return newMemoryStateStore()
 	}
 
-	client := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
+	options := &redis.Options{
 		Password: cfg.Password,
 		DB:       cfg.DB,
-	})
+	}
+
+	switch {
+	case strings.HasPrefix(cfg.Addr, "unix://"):
+		options.Network = "unix"
+		options.Addr = strings.TrimPrefix(cfg.Addr, "unix://")
+	case strings.HasPrefix(cfg.Addr, "/"):
+		options.Network = "unix"
+		options.Addr = cfg.Addr
+	default:
+		options.Addr = cfg.Addr
+	}
+
+	client := redis.NewClient(options)
 
 	return &valkeyStateStore{client: client}
 }

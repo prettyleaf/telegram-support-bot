@@ -139,7 +139,7 @@ WEB_AUTH_GITHUB_ALLOWED_LOGINS=your-github-login
 WEB_AUTH_TELEGRAM_ENABLED=true
 WEB_AUTH_TELEGRAM_ALLOWED_IDS=123456789,987654321
 
-VALKEY_ADDR=support-ticket-valkey:6379
+VALKEY_ADDR=/run/support-ticket-valkey/valkey.sock
 VALKEY_PASSWORD=
 VALKEY_DB=0
 ```
@@ -179,23 +179,21 @@ location /api/admin/ {
 }
 ```
 
-### Valkey and workers
+### Valkey
 
-Valkey is optional and is used only for:
+The Docker Compose stack now always starts a bundled Valkey container. It is used for:
 
 - web admin sessions
 - GitHub OAuth state
 - passkey registration/login ceremony state
 
-If `VALKEY_ADDR` is empty, the bot falls back to an in-memory store.
-
-Dedicated background workers were not added because there is no queueing or heavy async workload in the current admin panel flow. For this project, optional Valkey is enough.
-
-If you want the bundled Valkey service from `docker-compose.yml`, start the stack with the `web-admin` profile:
+Recommended `VALKEY_ADDR` inside Docker is the shared UNIX socket path:
 
 ```bash
-docker compose --profile web-admin up -d
+VALKEY_ADDR=/run/support-ticket-valkey/valkey.sock
 ```
+
+The bundled Valkey service also keeps TCP on `support-ticket-valkey:6379`, so existing configs continue to work. If `VALKEY_ADDR` is empty, the bot still falls back to an in-memory store.
 
 ## Commands
 

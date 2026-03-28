@@ -1,4 +1,4 @@
-import { Alert, Button, Stack, Text } from "@mantine/core";
+import { Alert, Button, Stack } from "@mantine/core";
 import { IconAlertCircle, IconBrandTelegram } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
@@ -89,8 +89,11 @@ export function TelegramLoginButton({ botID, botUsername, onAuth, disabled = fal
   return (
     <Stack gap="xs">
       <Button
-        variant="default"
-        color="gray"
+        fullWidth
+        variant="filled"
+        color="blue"
+        className="service-button service-button--telegram"
+        title={`Continue with @${botUsername}`}
         leftSection={<IconBrandTelegram size={16} />}
         disabled={!ready || disabled}
         loading={!ready && !error}
@@ -98,10 +101,6 @@ export function TelegramLoginButton({ botID, botUsername, onAuth, disabled = fal
       >
         Continue with Telegram
       </Button>
-
-      <Text size="xs" c="dimmed">
-        Login via @{botUsername}. The public admin domain should also be allowed for this bot in BotFather.
-      </Text>
 
       {error ? (
         <Alert radius="lg" color="gray" variant="light" icon={<IconAlertCircle size={16} />} title="Telegram login">

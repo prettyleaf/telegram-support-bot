@@ -3,6 +3,8 @@ import { Notifications } from "@mantine/notifications";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import "@fontsource/fraunces/400.css";
+import "@fontsource/fraunces/600.css";
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
 import "@fontsource/manrope/600.css";
@@ -14,12 +16,12 @@ import App from "./App";
 import "./styles.css";
 
 const theme = createTheme({
-  primaryColor: "gray",
+  primaryColor: "orange",
   defaultRadius: "md",
   fontFamily: "Manrope, ui-sans-serif, system-ui, sans-serif",
   headings: {
-    fontFamily: "Manrope, ui-sans-serif, system-ui, sans-serif",
-    fontWeight: "700"
+    fontFamily: "Fraunces, Georgia, serif",
+    fontWeight: "600"
   },
   components: {
     Button: {

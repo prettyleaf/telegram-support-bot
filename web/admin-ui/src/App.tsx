@@ -29,7 +29,6 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertCircle,
   IconArrowRight,
   IconBrandGithub,
   IconChartBar,
@@ -44,6 +43,12 @@ import {
   IconSunHigh,
   IconUserCancel
 } from "@tabler/icons-react";
+import {
+  startAuthentication,
+  startRegistration,
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON
+} from "@simplewebauthn/browser";
 import { startTransition, useDeferredValue, useEffect, useEffectEvent, useState } from "react";
 
 import { apiDelete, apiGet, apiPost } from "./api";
@@ -66,37 +71,31 @@ import type {
 const sectionItems: Array<{
   key: SectionKey;
   label: string;
-  description: string;
   icon: typeof IconChartBar;
 }> = [
   {
     key: "overview",
-    label: "Overview",
-    description: "Ticket pulse and key counters",
+    label: "Dashboard",
     icon: IconChartBar
   },
   {
     key: "tickets",
     label: "Tickets",
-    description: "Reply, change priority, add notes",
     icon: IconMessageCircle
   },
   {
     key: "canned",
     label: "Canned",
-    description: "Store quick answers",
     icon: IconMessageCircleBolt
   },
   {
     key: "banned",
-    label: "Banned",
-    description: "Manage blocked users",
+    label: "Bans",
     icon: IconUserCancel
   },
   {
     key: "security",
     label: "Security",
-    description: "Password and passkeys",
     icon: IconShieldLock
   }
 ];
@@ -186,13 +185,13 @@ function formatDateTime(value?: string | null) {
 function statusColor(status: string) {
   switch (status) {
     case "open":
-      return "teal";
+      return "orange";
     case "pending":
-      return "yellow";
+      return "orange";
     case "closed":
       return "gray";
     case "resolved":
-      return "blue";
+      return "dark";
     default:
       return "dark";
   }
@@ -203,7 +202,7 @@ function priorityColor(priority: string) {
     case "low":
       return "gray";
     case "normal":
-      return "blue";
+      return "orange";
     case "high":
       return "orange";
     case "urgent":
@@ -230,50 +229,48 @@ function displayMessageAuthor(message: TicketMessage) {
   return message.isAdmin ? "Support" : "User";
 }
 
-type PublicKeyCredentialJSONStatic = typeof PublicKeyCredential & {
-  parseCreationOptionsFromJSON?: (value: unknown) => PublicKeyCredentialCreationOptions;
-  parseRequestOptionsFromJSON?: (value: unknown) => PublicKeyCredentialRequestOptions;
-};
-
-function getPublicKeyCredentialAPI(): PublicKeyCredentialJSONStatic {
-  const api = globalThis.PublicKeyCredential as PublicKeyCredentialJSONStatic | undefined;
-  if (!api || !globalThis.navigator?.credentials) {
-    throw new Error("Passkeys are not supported in this browser.");
-  }
-  if (!globalThis.isSecureContext) {
-    throw new Error("Passkeys require HTTPS or localhost.");
-  }
-  return api;
-}
-
-async function createPasskeyCredential(options: unknown) {
-  const parser = getPublicKeyCredentialAPI();
-  if (!parser.parseCreationOptionsFromJSON) {
-    throw new Error("This browser does not support passkey registration JSON helpers.");
+function showPasskeyError(mode: "login" | "registration", error: unknown) {
+  if (!(error instanceof Error)) {
+    notifications.show({
+      color: "red",
+      title: mode === "login" ? "Passkey sign-in failed" : "Passkey registration failed",
+      message: "An unexpected error occurred."
+    });
+    return;
   }
 
-  const publicKey = parser.parseCreationOptionsFromJSON(options);
-  const credential = await navigator.credentials.create({ publicKey });
-  if (!credential || typeof (credential as unknown as { toJSON?: () => unknown }).toJSON !== "function") {
-    throw new Error("Browser did not return a passkey credential.");
+  if (error.name === "NotAllowedError") {
+    notifications.show({
+      color: "yellow",
+      title: mode === "login" ? "Passkey sign-in cancelled" : "Passkey registration cancelled",
+      message: mode === "login" ? "Authentication was cancelled." : "Registration was cancelled."
+    });
+    return;
   }
 
-  return (credential as unknown as { toJSON(): unknown }).toJSON();
-}
-
-async function getPasskeyCredential(options: unknown) {
-  const parser = getPublicKeyCredentialAPI();
-  if (!parser.parseRequestOptionsFromJSON) {
-    throw new Error("This browser does not support passkey sign-in JSON helpers.");
+  if (error.name === "NotSupportedError") {
+    notifications.show({
+      color: "red",
+      title: mode === "login" ? "Passkey sign-in failed" : "Passkey registration failed",
+      message: "Passkeys are not supported on this device."
+    });
+    return;
   }
 
-  const publicKey = parser.parseRequestOptionsFromJSON(options);
-  const credential = await navigator.credentials.get({ publicKey });
-  if (!credential || typeof (credential as unknown as { toJSON?: () => unknown }).toJSON !== "function") {
-    throw new Error("Browser did not return a passkey assertion.");
+  if (mode === "registration" && error.name === "InvalidStateError") {
+    notifications.show({
+      color: "red",
+      title: "Passkey registration failed",
+      message: "This device is already registered."
+    });
+    return;
   }
 
-  return (credential as unknown as { toJSON(): unknown }).toJSON();
+  notifications.show({
+    color: "red",
+    title: mode === "login" ? "Passkey sign-in failed" : "Passkey registration failed",
+    message: error.message || "Unexpected error"
+  });
 }
 
 type StatCardProps = {
@@ -673,7 +670,7 @@ export default function App() {
     try {
       await apiPost("/api/admin/auth/telegram/verify", payload);
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Telegram sign-in complete",
         message: "The control room is ready."
       });
@@ -721,7 +718,7 @@ export default function App() {
       });
       setPasswordValue("");
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Signed in",
         message: "Password authentication succeeded."
       });
@@ -741,20 +738,18 @@ export default function App() {
     setAuthBusy(true);
     try {
       const payload = await apiPost<PasskeyLoginOptions>("/api/admin/auth/passkey/login/options");
-      const credential = await getPasskeyCredential(payload.options);
+      const credential = await startAuthentication({
+        optionsJSON: payload.options as PublicKeyCredentialRequestOptionsJSON
+      });
       await apiPost(`/api/admin/auth/passkey/login/verify?requestId=${encodeURIComponent(payload.requestId)}`, credential);
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Passkey accepted",
         message: "Welcome back."
       });
       await refreshBootstrap(false);
     } catch (error) {
-      notifications.show({
-        color: "red",
-        title: "Passkey sign-in failed",
-        message: errorToMessage(error)
-      });
+      showPasskeyError("login", error);
     } finally {
       setAuthBusy(false);
     }
@@ -788,7 +783,7 @@ export default function App() {
       });
       setReplyText("");
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Reply sent",
         message: "The user received your message."
       });
@@ -813,7 +808,7 @@ export default function App() {
     try {
       await apiPost(`/api/admin/tickets/${selectedTicketID}/priority`, { priority });
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Priority updated",
         message: `Priority is now ${priority}.`
       });
@@ -841,7 +836,7 @@ export default function App() {
       });
       setNoteText("");
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Note added",
         message: "Internal note saved."
       });
@@ -866,7 +861,7 @@ export default function App() {
     try {
       await apiPost(`/api/admin/tickets/${selectedTicketID}/${action}`);
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: action === "close" ? "Ticket closed" : "Ticket reopened",
         message: "Ticket state was updated."
       });
@@ -898,7 +893,7 @@ export default function App() {
       setCannedTitle("");
       setCannedContent("");
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Canned response saved",
         message: "Shortcut is ready to use."
       });
@@ -945,7 +940,7 @@ export default function App() {
       setBanUserID("");
       setBanReason("");
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "User banned",
         message: "The user can no longer open tickets."
       });
@@ -980,25 +975,23 @@ export default function App() {
   async function registerPasskey() {
     setPasskeyBusy(true);
     try {
-      const options = await apiPost<unknown>("/api/admin/auth/passkey/register/options");
-      const credential = await createPasskeyCredential(options);
+      const options = await apiPost<PublicKeyCredentialCreationOptionsJSON>("/api/admin/auth/passkey/register/options");
+      const credential = await startRegistration({
+        optionsJSON: options
+      });
       const updated = await apiPost<WebAdminPasskey[]>(
         `/api/admin/auth/passkey/register/verify?name=${encodeURIComponent(passkeyName.trim() || "Passkey")}`,
         credential
       );
       setPasskeys(updated);
       notifications.show({
-        color: "teal",
+        color: "orange",
         title: "Passkey added",
         message: "This device is now trusted for sign-in."
       });
       await Promise.all([refreshBootstrap(false), loadPasskeys(true)]);
     } catch (error) {
-      notifications.show({
-        color: "red",
-        title: "Passkey registration failed",
-        message: errorToMessage(error)
-      });
+      showPasskeyError("registration", error);
     } finally {
       setPasskeyBusy(false);
     }
@@ -1024,7 +1017,7 @@ export default function App() {
     return (
       <Center mih="100vh">
         <Stack align="center" gap="sm">
-          <Loader color="gray" />
+          <Loader color="orange" />
           <Text c="dimmed">Loading the control room…</Text>
         </Stack>
       </Center>
@@ -1041,87 +1034,78 @@ export default function App() {
         telegram: false
       }
     };
+    const hasTelegram = Boolean(guestBootstrap.methods.telegram && guestBootstrap.telegram?.botUsername);
+    const hasAlternativeMethods = guestBootstrap.methods.passkey || guestBootstrap.methods.github || hasTelegram;
 
     return (
       <Center px="lg" className="auth-grid">
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="xl" maw={1160} w="100%">
-          <Paper className="glass-panel auth-ambient auth-hero-panel" radius="xl" p={{ base: "lg", md: "2rem" }}>
-            <Stack gap="lg">
-              <Group gap="xs">
-                <ThemeIcon size={42} radius="xl" variant="light" color="gray">
+        <Box className="auth-orb auth-orb-one" />
+        <Box className="auth-orb auth-orb-two" />
+        <Box className="auth-orb auth-orb-three" />
+
+        <Paper className="glass-panel auth-card auth-login-card" radius="xl" p={{ base: "lg", md: "xl" }}>
+          <Stack gap="lg">
+            <Group justify="space-between" align="start" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap">
+                <ThemeIcon size={42} radius="xl" variant="light" color="orange">
                   <IconSparkles size={22} />
                 </ThemeIcon>
-                <Text className="section-caption">Support ticket bot</Text>
-                <ThemeToggle />
-              </Group>
-
-              <Stack gap="sm">
-                <Title order={1} className="hero-title" maw={500}>
-                  Support Control Room
-                </Title>
-                <Text c="dimmed" maw={500}>
-                  One place for the whole admin workflow: ticket triage, canned replies, bans, notes, and secure access
-                  with password, passkeys, Telegram, or GitHub.
-                </Text>
-              </Stack>
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                <StatCard label="Auth methods" value={Object.values(guestBootstrap.methods).filter(Boolean).length} tone="gray" />
-                <StatCard label="Entry points" value={1} tone="blue" />
-              </SimpleGrid>
-
-              <Alert variant="light" color="gray" radius="lg" icon={<IconAlertCircle size={18} />} title="Reverse proxy friendly">
-                Serve <code>/admin</code> and <code>/api/admin</code> through Nginx or SWAG to the bot process. Passkeys
-                rely on the public URL configured in the backend.
-              </Alert>
-            </Stack>
-          </Paper>
-
-          <Paper className="glass-panel auth-card" radius="xl" p={{ base: "lg", md: "xl" }}>
-            <Stack gap="lg">
-              <Stack gap={4}>
-                <Text className="section-caption">Authentication</Text>
-                <Title order={2} className="hero-title">
-                  Sign in
-                </Title>
-                <Text c="dimmed">
-                  Use any enabled method below. GitHub and Telegram are restricted by the backend allowlists.
-                </Text>
-              </Stack>
-
-              {guestBootstrap.methods.password ? (
-                <Stack gap="sm">
-                  <TextInput
-                    label="Username"
-                    placeholder="admin"
-                    value={passwordUsername}
-                    onChange={(event) => setPasswordUsername(event.currentTarget.value)}
-                  />
-                  <PasswordInput
-                    label="Password"
-                    placeholder="Enter your password"
-                    value={passwordValue}
-                    onChange={(event) => setPasswordValue(event.currentTarget.value)}
-                  />
-                  <Button loading={authBusy} onClick={handlePasswordLogin} rightSection={<IconArrowRight size={16} />}>
-                    Sign in with password
-                  </Button>
+                <Stack gap={0}>
+                  <Title order={3} className="hero-title">
+                    Support Ticket Bot
+                  </Title>
+                  <Text size="sm" c="dimmed">
+                    Admin login
+                  </Text>
                 </Stack>
-              ) : null}
+              </Group>
+              <ThemeToggle />
+            </Group>
 
-              <Divider label="Alternative methods" labelPosition="center" />
-
+            {guestBootstrap.methods.password ? (
               <Stack gap="sm">
+                <TextInput
+                  label="Username"
+                  placeholder="admin"
+                  value={passwordUsername}
+                  onChange={(event) => setPasswordUsername(event.currentTarget.value)}
+                />
+                <PasswordInput
+                  label="Password"
+                  placeholder="Enter your password"
+                  value={passwordValue}
+                  onChange={(event) => setPasswordValue(event.currentTarget.value)}
+                />
+                <Button fullWidth loading={authBusy} onClick={handlePasswordLogin} rightSection={<IconArrowRight size={16} />}>
+                  Sign in
+                </Button>
+              </Stack>
+            ) : null}
+
+            {hasAlternativeMethods ? (
+              <Stack gap="sm">
+                {guestBootstrap.methods.password ? <Divider /> : null}
+
                 {guestBootstrap.methods.passkey ? (
-                  <Button variant="default" color="gray" loading={authBusy} leftSection={<IconKey size={16} />} onClick={handlePasskeyLogin}>
+                  <Button
+                    fullWidth
+                    variant="light"
+                    color="orange"
+                    className="service-button service-button--passkey"
+                    loading={authBusy}
+                    leftSection={<IconKey size={16} />}
+                    onClick={handlePasskeyLogin}
+                  >
                     Use passkey
                   </Button>
                 ) : null}
 
                 {guestBootstrap.methods.github ? (
                   <Button
-                    variant="default"
-                    color="gray"
+                    fullWidth
+                    variant="filled"
+                    color="dark"
+                    className="service-button service-button--github"
                     loading={authBusy}
                     leftSection={<IconBrandGithub size={16} />}
                     onClick={() => {
@@ -1132,21 +1116,18 @@ export default function App() {
                   </Button>
                 ) : null}
 
-                {guestBootstrap.methods.telegram && guestBootstrap.telegram?.botUsername ? (
-                  <Stack gap={6}>
-                    <Text fw={600}>Telegram sign-in</Text>
-                    <TelegramLoginButton
-                      botID={guestBootstrap.telegram.botId}
-                      botUsername={guestBootstrap.telegram.botUsername}
-                      onAuth={handleTelegramAuth}
-                      disabled={authBusy}
-                    />
-                  </Stack>
+                {hasTelegram ? (
+                  <TelegramLoginButton
+                    botID={guestBootstrap.telegram!.botId}
+                    botUsername={guestBootstrap.telegram!.botUsername}
+                    onAuth={handleTelegramAuth}
+                    disabled={authBusy}
+                  />
                 ) : null}
               </Stack>
-            </Stack>
-          </Paper>
-        </SimpleGrid>
+            ) : null}
+          </Stack>
+        </Paper>
       </Center>
     );
   }
@@ -1154,10 +1135,6 @@ export default function App() {
   const adminBootstrap = bootstrap;
   const currentSection = sectionItems.find((item) => item.key === activeSection);
   const pageTitle = activeSection === "tickets" && selectedTicket ? `Ticket #${selectedTicket.ticketNumber}` : currentSection?.label ?? "Overview";
-  const pageDescription =
-    activeSection === "tickets" && selectedTicket
-      ? selectedTicket.displayName
-      : currentSection?.description ?? "Support control room";
 
   return (
     <AppShell
@@ -1168,29 +1145,29 @@ export default function App() {
     >
       <AppShell.Header p="xs">
         <Paper className="app-header-frame" radius="xl">
-          <Group justify="space-between" h="100%" wrap="nowrap">
-            <Group wrap="nowrap" gap="md">
+          <Group className="app-header-layout" h="100%" wrap="nowrap">
+            <Group className="app-header-main" wrap="nowrap" gap="md">
               <Burger opened={navbarOpened} onClick={navbar.toggle} hiddenFrom="sm" size="sm" />
-              <Stack gap={2}>
-                <Text className="section-caption">Support workspace</Text>
-                <Title order={3} className="hero-title">
-                  {pageTitle}
-                </Title>
-                <Text size="sm" c="dimmed">
-                  {pageDescription}
-                </Text>
-              </Stack>
+              <Paper className="glass-panel header-brand" radius="xl">
+                <Group gap="sm" wrap="nowrap">
+                  <ThemeIcon variant="light" color="orange" radius="xl" size="lg">
+                    <IconSparkles size={18} />
+                  </ThemeIcon>
+                  <Text fw={700}>Support Ticket Bot</Text>
+                </Group>
+              </Paper>
+              <Title order={3} className="hero-title page-title">
+                {pageTitle}
+              </Title>
             </Group>
 
-            <Group gap="sm" wrap="nowrap">
+            <Group className="app-header-actions" gap="sm" wrap="nowrap">
               <Paper className="glass-panel identity-chip" radius="xl" px="md" py="xs" visibleFrom="md">
                 <Text fw={600}>{adminBootstrap.user?.displayName}</Text>
-                <Text size="xs" c="dimmed">
-                  {adminBootstrap.user?.username ? `@${adminBootstrap.user.username}` : "Admin session"}
-                </Text>
+                {adminBootstrap.user?.username ? <Text size="xs" c="dimmed">@{adminBootstrap.user.username}</Text> : null}
               </Paper>
               <ThemeToggle />
-              <ActionIcon variant="default" color="gray" size="lg" onClick={() => void refreshBootstrap(false)}>
+              <ActionIcon variant="default" color="orange" size="lg" onClick={() => void refreshBootstrap(false)}>
                 <IconRefresh size={18} />
               </ActionIcon>
               <Button variant="default" color="red" leftSection={<IconDoorExit size={16} />} loading={authBusy} onClick={handleLogout}>
@@ -1205,20 +1182,6 @@ export default function App() {
         <Paper className="app-navbar-frame" radius="xl">
           <Stack justify="space-between" h="100%">
             <Stack gap="md">
-              <Paper className="glass-panel app-brand" radius="xl">
-                <Group gap="sm" wrap="nowrap">
-                  <ThemeIcon variant="light" color="gray" radius="xl" size="lg">
-                    <IconSparkles size={18} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text fw={700}>Support Ticket Bot</Text>
-                    <Text size="sm" c="dimmed">
-                      Admin control room
-                    </Text>
-                  </Stack>
-                </Group>
-              </Paper>
-
               <Stack gap="xs">
                 {sectionItems.map((item) => {
                   const Icon = item.icon;
@@ -1228,7 +1191,6 @@ export default function App() {
                       className="sidebar-link"
                       active={activeSection === item.key}
                       label={item.label}
-                      description={item.description}
                       styles={{
                         root: {
                           borderRadius: "16px",
@@ -1236,14 +1198,10 @@ export default function App() {
                         },
                         label: {
                           fontWeight: 700
-                        },
-                        description: {
-                          marginTop: "2px",
-                          lineHeight: 1.3
                         }
                       }}
                       leftSection={
-                        <ThemeIcon variant={activeSection === item.key ? "filled" : "default"} color="gray" radius="md" size="lg">
+                        <ThemeIcon variant={activeSection === item.key ? "filled" : "default"} color={activeSection === item.key ? "orange" : "gray"} radius="md" size="lg">
                           <Icon size={18} />
                         </ThemeIcon>
                       }
@@ -1255,26 +1213,6 @@ export default function App() {
                 })}
               </Stack>
             </Stack>
-
-            <Paper className="glass-panel sidebar-note" radius="xl" p="md">
-              <Stack gap="sm">
-                <Group gap="sm" wrap="nowrap">
-                  <ThemeIcon variant="light" color="gray" radius="md" size="lg">
-                    <IconShieldLock size={18} />
-                  </ThemeIcon>
-                  <Stack gap={0}>
-                    <Text fw={700}>Security posture</Text>
-                    <Text size="sm" c="dimmed">
-                      Password, GitHub, Telegram, passkeys
-                    </Text>
-                  </Stack>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Passkeys live in the security section. Valkey stays optional and is only used for sessions and auth
-                  state.
-                </Text>
-              </Stack>
-            </Paper>
           </Stack>
         </Paper>
       </AppShell.Navbar>
@@ -1284,54 +1222,46 @@ export default function App() {
           <Stack gap="md">
             {activeSection === "overview" ? (
               <Stack gap="md">
-              <Group justify="space-between" align="end">
-                <Stack gap={2}>
-                  <Text className="section-caption">Overview</Text>
+                <Group justify="space-between" align="end">
                   <Title order={2} className="hero-title">
-                    Ticket pulse
+                    Dashboard
                   </Title>
-                </Stack>
-                <SegmentedControl
-                  value={summaryDays}
-                  onChange={setSummaryDays}
-                  data={[
-                    { label: "7 days", value: "7" },
-                    { label: "30 days", value: "30" },
-                    { label: "90 days", value: "90" }
-                  ]}
-                />
-              </Group>
+                  <SegmentedControl
+                    value={summaryDays}
+                    onChange={setSummaryDays}
+                    data={[
+                      { label: "7 days", value: "7" },
+                      { label: "30 days", value: "30" },
+                      { label: "90 days", value: "90" }
+                    ]}
+                  />
+                </Group>
 
               {summaryBusy && !summary ? (
                 <Center py="xl">
-                  <Loader color="gray" />
+                  <Loader color="orange" />
                 </Center>
               ) : null}
 
               {summary ? (
                 <>
                   <SimpleGrid cols={{ base: 1, sm: 2, xl: 4 }} spacing="md">
-                    <StatCard label="Opened" value={summary.opened} tone="teal" />
-                    <StatCard label="Closed" value={summary.closed} tone="blue" />
-                    <StatCard label="Currently open" value={summary.currentlyOpen} tone="gray" />
+                    <StatCard label="Opened" value={summary.opened} tone="orange" />
+                    <StatCard label="Closed" value={summary.closed} tone="gray" />
+                    <StatCard label="Currently open" value={summary.currentlyOpen} tone="orange" />
                     <StatCard label="Total closed" value={summary.totalClosed} tone="gray" />
                   </SimpleGrid>
 
                   <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
                     <Paper className="glass-panel" p="md" radius="xl">
                       <Stack gap="md">
-                        <Text className="section-caption">Session</Text>
                         <Title order={3} className="hero-title">
-                          Signed in as {adminBootstrap.user?.displayName}
+                          {adminBootstrap.user?.displayName}
                         </Title>
-                        <Text c="dimmed">
-                          This panel mirrors the Telegram admin workflow: ticket replies, notes, priority changes, canned
-                          responses, bans, password auth, GitHub OAuth, Telegram login, and passkeys.
-                        </Text>
                         <Group>
                           {adminBootstrap.methods.password ? <Badge color="gray">Password</Badge> : null}
-                          {adminBootstrap.methods.passkey ? <Badge color="teal">Passkey</Badge> : null}
-                          {adminBootstrap.methods.telegram ? <Badge color="blue">Telegram</Badge> : null}
+                          {adminBootstrap.methods.passkey ? <Badge color="orange">Passkey</Badge> : null}
+                          {adminBootstrap.methods.telegram ? <Badge color="orange">Telegram</Badge> : null}
                           {adminBootstrap.methods.github ? <Badge color="gray">GitHub</Badge> : null}
                         </Group>
                       </Stack>
@@ -1339,7 +1269,9 @@ export default function App() {
 
                     <Paper className="glass-panel" p="md" radius="xl">
                       <Stack gap="md">
-                        <Text className="section-caption">Quick actions</Text>
+                        <Title order={3} className="hero-title">
+                          Quick actions
+                        </Title>
                         <Button variant="default" color="gray" leftSection={<IconMessageCircle size={16} />} onClick={() => openSection("tickets")}>
                           Open ticket workspace
                         </Button>
@@ -1359,16 +1291,13 @@ export default function App() {
 
             {activeSection === "tickets" ? (
               <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
-              <Paper className="glass-panel" p="md" radius="xl">
-                <Stack gap="md">
-                  <Group justify="space-between" align="end">
-                    <Stack gap={2}>
-                      <Text className="section-caption">Tickets</Text>
+                <Paper className="glass-panel" p="md" radius="xl">
+                  <Stack gap="md">
+                    <Group justify="space-between" align="end">
                       <Title order={3} className="hero-title">
-                        Queue
+                        Tickets
                       </Title>
-                    </Stack>
-                    <ActionIcon variant="default" color="gray" size="lg" onClick={() => void loadTickets()}>
+                    <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTickets()}>
                       <IconRefresh size={18} />
                     </ActionIcon>
                   </Group>
@@ -1399,7 +1328,7 @@ export default function App() {
                     <Stack gap="sm">
                       {ticketsBusy && !tickets ? (
                         <Center py="xl">
-                          <Loader color="gray" />
+                          <Loader color="orange" />
                         </Center>
                       ) : null}
 
@@ -1483,20 +1412,17 @@ export default function App() {
                     </Button>
                   </Group>
                 </Stack>
-              </Paper>
+                </Paper>
 
-              <Stack gap="md">
-                <Paper className="glass-panel" p="md" radius="xl">
-                  <Group justify="space-between" align="start">
-                    <Stack gap={2}>
-                      <Text className="section-caption">Workspace</Text>
+                <Stack gap="md">
+                  <Paper className="glass-panel" p="md" radius="xl">
+                    <Group justify="space-between" align="start">
                       <Title order={3} className="hero-title">
-                        {selectedTicket ? `#${selectedTicket.ticketNumber}` : "Choose a ticket"}
+                        {selectedTicket ? `#${selectedTicket.ticketNumber}` : "Workspace"}
                       </Title>
-                    </Stack>
                     {selectedTicketID ? (
                       <Group gap="xs">
-                        <ActionIcon variant="default" color="gray" size="lg" onClick={() => void loadTicketWorkspace(selectedTicketID)}>
+                        <ActionIcon variant="default" color="orange" size="lg" onClick={() => void loadTicketWorkspace(selectedTicketID)}>
                           <IconRefresh size={18} />
                         </ActionIcon>
                         <Button component="a" href={`/api/admin/tickets/${selectedTicketID}/export`} variant="default" color="gray">
@@ -1543,7 +1469,7 @@ export default function App() {
                       <Group>
                         <Button
                           variant="light"
-                          color={selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "teal" : "red"}
+                          color={selectedTicket.status === "closed" || selectedTicket.status === "resolved" ? "orange" : "red"}
                           loading={ticketActionBusy}
                           onClick={() =>
                             void toggleTicketStatus(
@@ -1569,7 +1495,7 @@ export default function App() {
                       </Group>
                     </Stack>
                   )}
-                </Paper>
+                  </Paper>
 
                 <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
                   <Paper className="glass-panel" p="md" radius="xl">
@@ -1578,7 +1504,7 @@ export default function App() {
                         <Title order={4} className="hero-title">
                           Timeline
                         </Title>
-                        {ticketBusy ? <Loader size="sm" color="gray" /> : null}
+                        {ticketBusy ? <Loader size="sm" color="orange" /> : null}
                       </Group>
 
                       <ScrollArea h={320} offsetScrollbars className="tight-scroll">
@@ -1663,18 +1589,17 @@ export default function App() {
                     </Stack>
                   </Paper>
                 </SimpleGrid>
-              </Stack>
+                </Stack>
               </SimpleGrid>
             ) : null}
 
             {activeSection === "canned" ? (
               <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
-              <Paper className="glass-panel" p="md" radius="xl">
-                <Stack gap="md">
-                  <Text className="section-caption">Canned responses</Text>
-                  <Title order={3} className="hero-title">
-                    Create shortcut
-                  </Title>
+                <Paper className="glass-panel" p="md" radius="xl">
+                  <Stack gap="md">
+                    <Title order={3} className="hero-title">
+                      New canned reply
+                    </Title>
                   <TextInput label="Shortcut" placeholder="payment_issue" value={shortcutValue} onChange={(event) => setShortcutValue(event.currentTarget.value)} />
                   <TextInput label="Title" placeholder="Billing follow-up" value={cannedTitle} onChange={(event) => setCannedTitle(event.currentTarget.value)} />
                   <Textarea
@@ -1697,7 +1622,6 @@ export default function App() {
 
               <Paper className="glass-panel" p="md" radius="xl">
                 <Stack gap="md">
-                  <Text className="section-caption">Library</Text>
                   <Title order={3} className="hero-title">
                     Saved replies
                   </Title>
@@ -1706,7 +1630,7 @@ export default function App() {
                     <Stack gap="sm">
                       {cannedBusy && cannedResponses.length === 0 ? (
                         <Center py="xl">
-                          <Loader color="gray" />
+                          <Loader color="orange" />
                         </Center>
                       ) : null}
 
@@ -1748,9 +1672,8 @@ export default function App() {
               <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
               <Paper className="glass-panel" p="md" radius="xl">
                 <Stack gap="md">
-                  <Text className="section-caption">Ban list</Text>
                   <Title order={3} className="hero-title">
-                    Block a user
+                    Ban user
                   </Title>
                   <TextInput
                     label="Telegram user ID"
@@ -1772,15 +1695,14 @@ export default function App() {
 
               <Paper className="glass-panel" p="md" radius="xl">
                 <Stack gap="md">
-                  <Text className="section-caption">Blocked users</Text>
                   <Title order={3} className="hero-title">
-                    Current bans
+                    Bans
                   </Title>
                   <ScrollArea h={520} offsetScrollbars className="tight-scroll">
                     <Stack gap="sm">
                       {bannedBusy && bannedUsers.length === 0 ? (
                         <Center py="xl">
-                          <Loader color="gray" />
+                          <Loader color="orange" />
                         </Center>
                       ) : null}
 
@@ -1796,7 +1718,7 @@ export default function App() {
                                   User ID {user.userId}
                                 </Text>
                               </Box>
-                              <Button variant="subtle" color="teal" onClick={() => void unbanUser(user.userId)}>
+                              <Button variant="subtle" color="orange" onClick={() => void unbanUser(user.userId)}>
                                 Unban
                               </Button>
                             </Group>
@@ -1824,14 +1746,9 @@ export default function App() {
               <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
               <Paper className="glass-panel" p="md" radius="xl">
                 <Stack gap="md">
-                  <Text className="section-caption">Security</Text>
                   <Title order={3} className="hero-title">
                     Passkeys
                   </Title>
-                  <Text c="dimmed">
-                    Register a passkey for the current admin account. Sessions and short-lived auth state can be stored in
-                    Valkey when configured.
-                  </Text>
                   <TextInput
                     label="Passkey name"
                     placeholder="Primary workstation"
@@ -1851,9 +1768,8 @@ export default function App() {
 
               <Paper className="glass-panel" p="md" radius="xl">
                 <Stack gap="md">
-                  <Text className="section-caption">Trusted devices</Text>
                   <Title order={3} className="hero-title">
-                    Registered passkeys
+                    Trusted devices
                   </Title>
 
                   <ScrollArea h={400} offsetScrollbars className="tight-scroll">
