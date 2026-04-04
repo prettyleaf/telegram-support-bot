@@ -1004,8 +1004,7 @@ func (h *AdminHandlers) HandleAdminMessage(ctx context.Context, b *bot.Bot, upda
 		msgText = message.Caption
 	}
 
-	hasMedia := message.Photo != nil || message.Document != nil || message.Video != nil ||
-		message.Voice != nil || message.Audio != nil || message.Sticker != nil
+	mediaMeta := utils.ExtractTelegramMediaMetadata(message)
 
 	ticketMsg := &database.TicketMessage{
 		TicketID:          ticket.ID,
@@ -1016,7 +1015,31 @@ func (h *AdminHandlers) HandleAdminMessage(ctx context.Context, b *bot.Bot, upda
 		MessageText:       &msgText,
 		MessageID:         func() *int64 { id := int64(sentMsg.ID); return &id }(),
 		OriginalMessageID: func() *int64 { id := int64(message.ID); return &id }(),
-		HasMedia:          hasMedia,
+		HasMedia:          mediaMeta.HasMedia,
+		MediaType: func() *string {
+			if mediaMeta.MediaType == "" {
+				return nil
+			}
+			return &mediaMeta.MediaType
+		}(),
+		MediaFileID: func() *string {
+			if mediaMeta.FileID == "" {
+				return nil
+			}
+			return &mediaMeta.FileID
+		}(),
+		MediaFileName: func() *string {
+			if mediaMeta.FileName == "" {
+				return nil
+			}
+			return &mediaMeta.FileName
+		}(),
+		MediaMimeType: func() *string {
+			if mediaMeta.MimeType == "" {
+				return nil
+			}
+			return &mediaMeta.MimeType
+		}(),
 	}
 
 	if err := h.deps.TicketService.SaveMessage(ctx, ticketMsg); err != nil {

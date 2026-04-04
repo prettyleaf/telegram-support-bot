@@ -293,10 +293,16 @@ func (r *Repository) CreateTicketMessage(ctx context.Context, msg *TicketMessage
 	msg.SenderName = utils.SanitizeUTF8Ptr(msg.SenderName)
 	msg.SenderUsername = utils.SanitizeUTF8Ptr(msg.SenderUsername)
 	msg.MessageText = utils.SanitizeUTF8Ptr(msg.MessageText)
+	msg.MediaFileName = utils.SanitizeUTF8Ptr(msg.MediaFileName)
+	msg.MediaMimeType = utils.SanitizeUTF8Ptr(msg.MediaMimeType)
 
 	query := `
-		INSERT INTO ticket_messages (ticket_id, sender_id, sender_name, sender_username, is_admin, message_text, message_id, original_message_id, has_media, media_type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO ticket_messages (
+			ticket_id, sender_id, sender_name, sender_username, is_admin, message_text,
+			message_id, original_message_id, has_media, media_type, media_file_id,
+			media_file_name, media_mime_type
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at
 	`
 	return pool.QueryRow(ctx, query,
@@ -310,12 +316,35 @@ func (r *Repository) CreateTicketMessage(ctx context.Context, msg *TicketMessage
 		msg.OriginalMessageID,
 		msg.HasMedia,
 		msg.MediaType,
+		msg.MediaFileID,
+		msg.MediaFileName,
+		msg.MediaMimeType,
 	).Scan(&msg.ID, &msg.CreatedAt)
 }
 
 // GetTicketMessages retrieves all messages for a ticket
 func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*TicketMessage, error) {
-	query := `SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC`
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			sender_id,
+			sender_name,
+			sender_username,
+			is_admin,
+			message_text,
+			message_id,
+			original_message_id,
+			has_media,
+			media_type,
+			media_file_id,
+			media_file_name,
+			media_mime_type,
+			created_at
+		FROM ticket_messages
+		WHERE ticket_id = $1
+		ORDER BY created_at ASC
+	`
 	rows, err := pool.Query(ctx, query, ticketID)
 	if err != nil {
 		return nil, err
@@ -328,7 +357,8 @@ func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*Ti
 		err := rows.Scan(
 			&msg.ID, &msg.TicketID, &msg.SenderID, &msg.SenderName, &msg.SenderUsername,
 			&msg.IsAdmin, &msg.MessageText, &msg.MessageID, &msg.OriginalMessageID,
-			&msg.HasMedia, &msg.MediaType, &msg.CreatedAt,
+			&msg.HasMedia, &msg.MediaType, &msg.MediaFileID, &msg.MediaFileName,
+			&msg.MediaMimeType, &msg.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -336,6 +366,47 @@ func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*Ti
 		messages = append(messages, &msg)
 	}
 	return messages, nil
+}
+
+// GetTicketMessage retrieves a single message by ticket and message ID.
+func (r *Repository) GetTicketMessage(ctx context.Context, ticketID int, messageID int) (*TicketMessage, error) {
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			sender_id,
+			sender_name,
+			sender_username,
+			is_admin,
+			message_text,
+			message_id,
+			original_message_id,
+			has_media,
+			media_type,
+			media_file_id,
+			media_file_name,
+			media_mime_type,
+			created_at
+		FROM ticket_messages
+		WHERE ticket_id = $1 AND id = $2
+		LIMIT 1
+	`
+
+	var msg TicketMessage
+	err := pool.QueryRow(ctx, query, ticketID, messageID).Scan(
+		&msg.ID, &msg.TicketID, &msg.SenderID, &msg.SenderName, &msg.SenderUsername,
+		&msg.IsAdmin, &msg.MessageText, &msg.MessageID, &msg.OriginalMessageID,
+		&msg.HasMedia, &msg.MediaType, &msg.MediaFileID, &msg.MediaFileName,
+		&msg.MediaMimeType, &msg.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &msg, nil
 }
 
 // Banned Users Operations
@@ -629,6 +700,142 @@ func (r *Repository) SetUserLastHWIDDeleteAt(ctx context.Context, userID int64, 
 	return err
 }
 
+// Web Admin Operations
+
+func (r *Repository) GetWebAdminUserByID(ctx context.Context, id int) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE id = $1`, id)
+}
+
+func (r *Repository) GetWebAdminUserByUsername(ctx context.Context, username string) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE username = $1`, username)
+}
+
+func (r *Repository) GetWebAdminUserByGitHubEmail(ctx context.Context, email string) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE github_email = $1`, email)
+}
+
+func (r *Repository) GetWebAdminUserByGitHubLogin(ctx context.Context, login string) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE github_login = $1`, login)
+}
+
+func (r *Repository) GetWebAdminUserByTelegramID(ctx context.Context, telegramID int64) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE telegram_id = $1`, telegramID)
+}
+
+func (r *Repository) GetWebAdminUserByWebauthnUserID(ctx context.Context, webauthnUserID []byte) (*WebAdminUser, error) {
+	return r.scanWebAdminUser(ctx, `SELECT * FROM web_admin_users WHERE webauthn_user_id = $1`, webauthnUserID)
+}
+
+func (r *Repository) UpsertWebAdminPasswordUser(ctx context.Context, username, displayName string, webauthnUserID []byte) (*WebAdminUser, error) {
+	query := `
+		INSERT INTO web_admin_users (username, display_name, webauthn_user_id, last_login_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (username) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			last_login_at = NOW(),
+			updated_at = NOW()
+		RETURNING *
+	`
+	return r.scanWebAdminUser(ctx, query, username, displayName, webauthnUserID)
+}
+
+func (r *Repository) CreateWebAdminGitHubUser(ctx context.Context, login, email, displayName string, webauthnUserID []byte) (*WebAdminUser, error) {
+	query := `
+		INSERT INTO web_admin_users (display_name, github_login, github_email, webauthn_user_id, last_login_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		RETURNING *
+	`
+	return r.scanWebAdminUser(ctx, query, displayName, login, email, webauthnUserID)
+}
+
+func (r *Repository) UpdateWebAdminGitHubIdentity(ctx context.Context, id int, login, email, displayName string) (*WebAdminUser, error) {
+	query := `
+		UPDATE web_admin_users
+		SET display_name = $2,
+			github_login = $3,
+			github_email = $4,
+			last_login_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING *
+	`
+	return r.scanWebAdminUser(ctx, query, id, displayName, login, email)
+}
+
+func (r *Repository) UpsertWebAdminTelegramUser(ctx context.Context, telegramID int64, username *string, displayName string, webauthnUserID []byte) (*WebAdminUser, error) {
+	query := `
+		INSERT INTO web_admin_users (username, display_name, telegram_id, webauthn_user_id, last_login_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (telegram_id) DO UPDATE SET
+			username = EXCLUDED.username,
+			display_name = EXCLUDED.display_name,
+			last_login_at = NOW(),
+			updated_at = NOW()
+		RETURNING *
+	`
+	return r.scanWebAdminUser(ctx, query, username, displayName, telegramID, webauthnUserID)
+}
+
+func (r *Repository) UpdateWebAdminLastLogin(ctx context.Context, id int) error {
+	_, err := pool.Exec(ctx, `UPDATE web_admin_users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1`, id)
+	return err
+}
+
+func (r *Repository) CreateWebAdminPasskey(ctx context.Context, adminUserID int, name, credentialID string, credential []byte) (*WebAdminPasskey, error) {
+	query := `
+		INSERT INTO web_admin_passkeys (admin_user_id, name, credential_id, credential)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, admin_user_id, name, credential_id, credential, created_at, updated_at, last_used_at
+	`
+	return r.scanWebAdminPasskey(ctx, query, adminUserID, name, credentialID, credential)
+}
+
+func (r *Repository) DeleteWebAdminPasskey(ctx context.Context, adminUserID int, passkeyID int) error {
+	_, err := pool.Exec(ctx, `DELETE FROM web_admin_passkeys WHERE id = $1 AND admin_user_id = $2`, passkeyID, adminUserID)
+	return err
+}
+
+func (r *Repository) GetWebAdminPasskeysByUserID(ctx context.Context, adminUserID int) ([]*WebAdminPasskey, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, admin_user_id, name, credential_id, credential, created_at, updated_at, last_used_at
+		FROM web_admin_passkeys
+		WHERE admin_user_id = $1
+		ORDER BY created_at ASC
+	`, adminUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*WebAdminPasskey
+	for rows.Next() {
+		var passkey WebAdminPasskey
+		if err := rows.Scan(
+			&passkey.ID,
+			&passkey.AdminUserID,
+			&passkey.Name,
+			&passkey.CredentialID,
+			&passkey.Credential,
+			&passkey.CreatedAt,
+			&passkey.UpdatedAt,
+			&passkey.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, &passkey)
+	}
+	return result, nil
+}
+
+func (r *Repository) TouchWebAdminPasskey(ctx context.Context, credentialID string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE web_admin_passkeys
+		SET last_used_at = NOW(), updated_at = NOW()
+		WHERE credential_id = $1
+	`, credentialID)
+	return err
+}
+
 // Helper functions
 
 func (r *Repository) scanTicket(ctx context.Context, query string, args ...interface{}) (*Ticket, error) {
@@ -670,4 +877,52 @@ func (r *Repository) scanTickets(ctx context.Context, query string, args ...inte
 		tickets = append(tickets, &t)
 	}
 	return tickets, nil
+}
+
+func (r *Repository) scanWebAdminUser(ctx context.Context, query string, args ...interface{}) (*WebAdminUser, error) {
+	row := pool.QueryRow(ctx, query, args...)
+
+	var user WebAdminUser
+	err := row.Scan(
+		&user.ID,
+		&user.Username,
+		&user.DisplayName,
+		&user.GitHubLogin,
+		&user.GitHubEmail,
+		&user.TelegramID,
+		&user.WebauthnUserID,
+		&user.LastLoginAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *Repository) scanWebAdminPasskey(ctx context.Context, query string, args ...interface{}) (*WebAdminPasskey, error) {
+	row := pool.QueryRow(ctx, query, args...)
+
+	var passkey WebAdminPasskey
+	err := row.Scan(
+		&passkey.ID,
+		&passkey.AdminUserID,
+		&passkey.Name,
+		&passkey.CredentialID,
+		&passkey.Credential,
+		&passkey.CreatedAt,
+		&passkey.UpdatedAt,
+		&passkey.LastUsedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &passkey, nil
 }

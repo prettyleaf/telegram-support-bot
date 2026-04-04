@@ -29,5 +29,12 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Frontend build artifacts
+web/admin-ui/node_modules/
+web/admin-ui/dist/
+web/admin-ui/*.tsbuildinfo
+web/admin-ui/vite.config.js
+web/admin-ui/vite.config.d.ts

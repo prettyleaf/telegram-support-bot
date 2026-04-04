@@ -613,25 +613,7 @@ func (h *UserHandlers) forwardUserMessage(ctx context.Context, b *bot.Bot, ticke
 		msgText = message.Caption
 	}
 
-	hasMedia := message.Photo != nil || message.Document != nil || message.Video != nil ||
-		message.Voice != nil || message.Audio != nil || message.Sticker != nil || message.VideoNote != nil
-
-	mediaType := ""
-	if message.Photo != nil {
-		mediaType = "photo"
-	} else if message.Document != nil {
-		mediaType = "document"
-	} else if message.Video != nil {
-		mediaType = "video"
-	} else if message.Voice != nil {
-		mediaType = "voice"
-	} else if message.Audio != nil {
-		mediaType = "audio"
-	} else if message.Sticker != nil {
-		mediaType = "sticker"
-	} else if message.VideoNote != nil {
-		mediaType = "video_note"
-	}
+	mediaMeta := utils.ExtractTelegramMediaMetadata(message)
 
 	ticketMsg := &database.TicketMessage{
 		TicketID:          ticket.ID,
@@ -642,12 +624,30 @@ func (h *UserHandlers) forwardUserMessage(ctx context.Context, b *bot.Bot, ticke
 		MessageText:       &msgText,
 		MessageID:         func() *int64 { id := int64(sentMsg.ID); return &id }(),
 		OriginalMessageID: func() *int64 { id := int64(message.ID); return &id }(),
-		HasMedia:          hasMedia,
+		HasMedia:          mediaMeta.HasMedia,
 		MediaType: func() *string {
-			if mediaType == "" {
+			if mediaMeta.MediaType == "" {
 				return nil
 			}
-			return &mediaType
+			return &mediaMeta.MediaType
+		}(),
+		MediaFileID: func() *string {
+			if mediaMeta.FileID == "" {
+				return nil
+			}
+			return &mediaMeta.FileID
+		}(),
+		MediaFileName: func() *string {
+			if mediaMeta.FileName == "" {
+				return nil
+			}
+			return &mediaMeta.FileName
+		}(),
+		MediaMimeType: func() *string {
+			if mediaMeta.MimeType == "" {
+				return nil
+			}
+			return &mediaMeta.MimeType
 		}(),
 	}
 

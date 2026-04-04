@@ -7,9 +7,20 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      VALKEY_ADDR: ${VALKEY_ADDR:-/run/support-ticket-valkey/valkey.sock}
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+      VALKEY_DB: ${VALKEY_DB:-0}
     depends_on:
       support-ticket-postgres:
         condition: service_healthy
+      support-ticket-valkey:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - valkey_socket:/run/support-ticket-valkey
     networks:
       - support-ticket-bot
 
@@ -31,8 +42,33 @@ services:
     networks:
       - support-ticket-bot
 
+  support-ticket-valkey:
+    image: valkey/valkey:9-alpine
+    container_name: support-ticket-valkey
+    hostname: support-ticket-valkey
+    restart: unless-stopped
+    command: >
+      sh -c 'mkdir -p /run/support-ticket-valkey &&
+      valkey-server
+      --save ""
+      --appendonly no
+      --maxmemory-policy noeviction
+      --loglevel warning
+      --unixsocket /run/support-ticket-valkey/valkey.sock
+      --unixsocketperm 770'
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-s", "/run/support-ticket-valkey/valkey.sock", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - valkey_socket:/run/support-ticket-valkey
+    networks:
+      - support-ticket-bot
+
 volumes:
   postgres_data:
+  valkey_socket:
 
 networks:
   support-ticket-bot:

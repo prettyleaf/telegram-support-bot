@@ -36,6 +36,9 @@ type TicketMessage struct {
 	OriginalMessageID *int64    `db:"original_message_id"`
 	HasMedia          bool      `db:"has_media"`
 	MediaType         *string   `db:"media_type"`
+	MediaFileID       *string   `db:"media_file_id"`
+	MediaFileName     *string   `db:"media_file_name"`
+	MediaMimeType     *string   `db:"media_mime_type"`
 	CreatedAt         time.Time `db:"created_at"`
 }
 
@@ -99,6 +102,32 @@ type UserOnboarding struct {
 	CaptchaPassedAt *time.Time `db:"captcha_passed_at"`
 	CreatedAt       time.Time  `db:"created_at"`
 	UpdatedAt       time.Time  `db:"updated_at"`
+}
+
+// WebAdminUser represents an admin account for the web panel.
+type WebAdminUser struct {
+	ID             int        `db:"id"`
+	Username       *string    `db:"username"`
+	DisplayName    string     `db:"display_name"`
+	GitHubLogin    *string    `db:"github_login"`
+	GitHubEmail    *string    `db:"github_email"`
+	TelegramID     *int64     `db:"telegram_id"`
+	WebauthnUserID []byte     `db:"webauthn_user_id"`
+	CreatedAt      time.Time  `db:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at"`
+	LastLoginAt    *time.Time `db:"last_login_at"`
+}
+
+// WebAdminPasskey stores a registered passkey for a web admin.
+type WebAdminPasskey struct {
+	ID           int        `db:"id"`
+	AdminUserID  int        `db:"admin_user_id"`
+	Name         string     `db:"name"`
+	CredentialID string     `db:"credential_id"`
+	Credential   []byte     `db:"credential"`
+	CreatedAt    time.Time  `db:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"`
+	LastUsedAt   *time.Time `db:"last_used_at"`
 }
 
 // Language constants

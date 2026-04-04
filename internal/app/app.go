@@ -16,6 +16,7 @@ import (
 	"remnafamily/internal/state"
 	"remnafamily/internal/types"
 	"remnafamily/internal/utils"
+	"remnafamily/internal/web"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -32,6 +33,7 @@ type App struct {
 	cancelFunc    context.CancelFunc
 	userHandlers  *handlers.UserHandlers
 	adminHandlers *handlers.AdminHandlers
+	webServer     *web.Server
 }
 
 // New creates a new application instance with all dependencies initialized.
@@ -255,6 +257,17 @@ func (a *App) Start() error {
 	utils.LogSystem("Support chat ID: %d", config.Cfg.SupportChatID)
 	utils.LogSystem("Admins: %v", config.Cfg.AdminIDs)
 
+	webServer, err := web.NewServer(a.Config, a.deps, me.Username, me.ID)
+	if err != nil {
+		return fmt.Errorf("create web admin server: %w", err)
+	}
+	a.webServer = webServer
+	if a.webServer != nil {
+		if err := a.webServer.Start(); err != nil {
+			return fmt.Errorf("start web admin server: %w", err)
+		}
+	}
+
 	// Start bot in background
 	go a.Bot.Start(a.ctx)
 
@@ -271,6 +284,14 @@ func (a *App) Stop() error {
 
 	// Cancel context
 	a.cancelFunc()
+
+	if a.webServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := a.webServer.Stop(shutdownCtx); err != nil {
+			utils.LogError("stop web admin server", err)
+		}
+	}
 
 	// Close database
 	database.Close()

@@ -18,6 +18,7 @@ A Telegram bot for managing support tickets using forum threads. Each ticket is 
 - **Business Hours Notice**: Optionally warn users when a ticket is opened outside support hours
 - **Onboarding Captcha**: Require a verification step on first bot launch, with generated or custom questions
 - **HWID Device Flow**: Detect HWID/device-limit questions, auto-escalate the ticket, and let users remove panel devices with a cooldown
+- **Web Admin Panel**: React + TypeScript admin site for ticket triage, replies, notes, canned responses, bans, and auth management
 
 ## Deployment Image Workflow
 
@@ -49,6 +50,12 @@ The repository includes a GitHub Actions workflow at `.github/workflows/docker-i
    docker compose up -d
    ```
 
+The Compose file bind-mounts local `config.yaml` into the container as `/app/config.yaml`, so config edits do not require rebuilding the image. After changing `config.yaml`, restart the bot container:
+
+```bash
+docker compose restart support-ticket-bot
+```
+
 The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and uses GitHub's standard `Generate release notes` output for the release description.
 
 The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.
@@ -58,6 +65,141 @@ Minimum `.env` example for the image version:
 ```env
 BOT_VERSION=1.2.3
 ```
+
+### SeaweedFS upload workflow
+
+The repository also includes `.github/workflows/release-to-seaweedfs.yml`. It runs on every published GitHub Release, downloads the release `.tar` assets, and uploads them to SeaweedFS through its S3-compatible endpoint.
+
+Required repository secrets:
+
+- `SEAWEEDFS_S3_ENDPOINT`
+- `SEAWEEDFS_S3_BUCKET`
+- `SEAWEEDFS_S3_ACCESS_KEY_ID`
+- `SEAWEEDFS_S3_SECRET_ACCESS_KEY`
+
+Optional repository secrets:
+
+- `SEAWEEDFS_S3_REGION` (defaults to `us-east-1` when empty)
+- `SEAWEEDFS_S3_PREFIX` (for example `telegram-support-bot/releases`)
+
+Uploaded object path format:
+
+```text
+s3://<bucket>/<prefix>/<version>/<filename>.tar
+```
+
+## Web Admin Panel
+
+The repository now includes a built-in admin panel under `web/admin-ui` and a Go HTTP server under `internal/web`.
+
+For local source-based runs outside Docker, build the frontend once before starting the bot:
+
+```bash
+cd web/admin-ui
+npm install
+npm run build
+```
+
+### What the panel covers
+
+- Dashboard summary for ticket activity
+- Ticket list with open/all/closed filters
+- Ticket detail view with replies, priority changes, close/reopen, notes, and HTML export
+- Canned responses management
+- Banned users management
+- Authentication and passkey management
+
+### Supported authentication methods
+
+Only these methods are enabled in the codebase:
+
+- Password
+- Passkey
+- Telegram Login Widget
+- GitHub OAuth
+
+No generic OAuth, Keycloak, Pocket ID, or Yandex auth is included.
+
+### Environment variables
+
+```env
+WEB_ADMIN_ENABLED=true
+WEB_ADMIN_LISTEN_ADDR=:8080
+WEB_ADMIN_PUBLIC_URL=https://support.example.com/admin
+WEB_ADMIN_BASE_PATH=/admin
+WEB_ADMIN_SESSION_COOKIE_NAME=support_admin_session
+WEB_ADMIN_SESSION_TTL_HOURS=168
+
+WEB_AUTH_PASSWORD_ENABLED=true
+WEB_AUTH_PASSWORD_USERS=admin:$2a$10$replace_with_bcrypt_hash
+
+WEB_AUTH_PASSKEY_ENABLED=true
+WEB_AUTH_PASSKEY_DISPLAY_NAME=Support Ticket Bot Admin
+
+WEB_AUTH_GITHUB_ENABLED=true
+WEB_AUTH_GITHUB_CLIENT_ID=your_github_client_id
+WEB_AUTH_GITHUB_CLIENT_SECRET=your_github_client_secret
+WEB_AUTH_GITHUB_ALLOWED_EMAILS=ops@example.com
+WEB_AUTH_GITHUB_ALLOWED_LOGINS=your-github-login
+
+WEB_AUTH_TELEGRAM_ENABLED=true
+WEB_AUTH_TELEGRAM_ALLOWED_IDS=123456789,987654321
+
+VALKEY_ADDR=/run/support-ticket-valkey/valkey.sock
+VALKEY_PASSWORD=
+VALKEY_DB=0
+```
+
+Notes:
+
+- `WEB_ADMIN_PUBLIC_URL` should be the public admin URL that users actually open in the browser.
+- Passkeys derive RP ID and allowed origin from `WEB_ADMIN_PUBLIC_URL`.
+- GitHub auth requires at least one allowlist entry in `WEB_AUTH_GITHUB_ALLOWED_EMAILS` or `WEB_AUTH_GITHUB_ALLOWED_LOGINS`.
+- If `WEB_AUTH_TELEGRAM_ALLOWED_IDS` is empty, `ADMIN_IDS` is used automatically.
+- Password auth expects bcrypt hashes in `WEB_AUTH_PASSWORD_USERS`.
+
+### Reverse proxy
+
+The bot container listens on `:8080` for the web admin. In Docker Compose the service exposes port `8080` to the internal Docker network, so a reverse proxy container can reach it as `http://support-ticket-bot:8080`.
+
+Proxy both of these paths to the bot container:
+
+- `/admin/`
+- `/api/admin/`
+
+Example Nginx location blocks:
+
+```nginx
+location /admin/ {
+    proxy_pass http://support-ticket-bot:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /api/admin/ {
+    proxy_pass http://support-ticket-bot:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+### Valkey
+
+The Docker Compose stack now always starts a bundled Valkey container. It is used for:
+
+- web admin sessions
+- GitHub OAuth state
+- passkey registration/login ceremony state
+
+Recommended `VALKEY_ADDR` inside Docker is the shared UNIX socket path:
+
+```bash
+VALKEY_ADDR=/run/support-ticket-valkey/valkey.sock
+```
+
+The bundled Valkey service also keeps TCP on `support-ticket-valkey:6379`, so existing configs continue to work. If `VALKEY_ADDR` is empty, the bot still falls back to an in-memory store.
 
 ## Commands
 
