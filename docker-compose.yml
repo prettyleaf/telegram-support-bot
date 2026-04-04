@@ -22,6 +22,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      - ./config.yaml:/app/config.yaml:ro
       - valkey_socket:/run/support-ticket-valkey
     networks:
       - support-ticket-bot

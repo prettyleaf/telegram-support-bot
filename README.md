@@ -50,6 +50,12 @@ The repository includes a GitHub Actions workflow at `.github/workflows/docker-i
    docker compose up -d
    ```
 
+The Compose file bind-mounts local `config.yaml` into the container as `/app/config.yaml`, so config edits do not require rebuilding the image. After changing `config.yaml`, restart the bot container:
+
+```bash
+docker compose restart support-ticket-bot
+```
+
 The workflow creates a GitHub Release named `<VERSION>`, attaches the `.tar` file and checksum, and uses GitHub's standard `Generate release notes` output for the release description.
 
 The loaded image tag will be `support-ticket-bot:<VERSION>`, and `docker-compose.yml` uses `BOT_VERSION` to select that exact image version.

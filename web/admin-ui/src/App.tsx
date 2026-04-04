@@ -105,6 +105,24 @@ const sectionItems: Array<{
   }
 ];
 
+const sectionGroups: Array<{
+  title: string;
+  items: SectionKey[];
+}> = [
+  {
+    title: "Overview",
+    items: ["overview"]
+  },
+  {
+    title: "Workspace",
+    items: ["tickets", "canned"]
+  },
+  {
+    title: "Administration",
+    items: ["banned", "security"]
+  }
+];
+
 type AppRoute = {
   basePath: string;
   section: SectionKey;
@@ -207,7 +225,7 @@ function priorityColor(priority: string) {
     case "low":
       return "gray";
     case "normal":
-      return "blue";
+      return "orange";
     case "high":
       return "yellow";
     case "urgent":
@@ -410,23 +428,168 @@ type StatCardProps = {
   label: string;
   value: number;
   tone: string;
+  icon: typeof IconChartBar;
 };
 
-function StatCard({ label, value, tone }: StatCardProps) {
+function StatCard({ label, value, tone, icon: Icon }: StatCardProps) {
   return (
     <Paper className="glass-panel stat-card" p="lg" radius="xl">
-      <Stack gap={6}>
-        <Text className="section-caption">{label}</Text>
-        <Group justify="space-between" align="end">
+      <Group justify="space-between" align="start" wrap="nowrap">
+        <Stack gap={8}>
+          <Text className="section-caption">{label}</Text>
           <Title order={3} className="hero-title">
             {value}
           </Title>
-          <Badge color={tone} variant="outline">
-            Live
-          </Badge>
-        </Group>
-      </Stack>
+        </Stack>
+        <ThemeIcon className="stat-orb" variant="light" color={tone} radius="xl" size={54}>
+          <Icon size={24} />
+        </ThemeIcon>
+      </Group>
     </Paper>
+  );
+}
+
+function sharePercent(value: number, total: number) {
+  if (total <= 0) {
+    return 0;
+  }
+
+  return Math.round((value / total) * 100);
+}
+
+function ratioPercent(value: number, baseline: number) {
+  if (baseline <= 0) {
+    return value > 0 ? 100 : 0;
+  }
+
+  return Math.round((value / baseline) * 100);
+}
+
+function formatAverage(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0.0";
+  }
+
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
+}
+
+type InsightMeterProps = {
+  label: string;
+  value: number;
+  total: number;
+  tone: "orange" | "gray" | "green";
+  helper: string;
+};
+
+function InsightMeter({ label, value, total, tone, helper }: InsightMeterProps) {
+  const percent = sharePercent(value, total);
+  const width = value > 0 ? Math.max(percent, 10) : 0;
+
+  return (
+    <Stack gap={6}>
+      <Group justify="space-between" align="center" wrap="nowrap">
+        <Text size="sm" fw={700}>
+          {label}
+        </Text>
+        <Text size="sm" c="dimmed">
+          {value}
+        </Text>
+      </Group>
+      <Box className="overview-meter-track">
+        <Box className="overview-meter-fill" data-tone={tone} style={{ width: `${width}%` }} />
+      </Box>
+      <Text size="xs" c="dimmed">
+        {helper}
+      </Text>
+    </Stack>
+  );
+}
+
+type MiniChartDatum = {
+  label: string;
+  value: number;
+  tone: "orange" | "gray" | "green";
+};
+
+function OverviewMiniChart({ data }: { data: MiniChartDatum[] }) {
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <Box className="overview-mini-chart">
+      {data.map((item) => {
+        const height = item.value > 0 ? Math.max(Math.round((item.value / maxValue) * 100), 14) : 0;
+
+        return (
+          <Stack key={item.label} gap={8} className="overview-mini-bar" justify="end">
+            <Text size="sm" fw={800} ta="center">
+              {item.value}
+            </Text>
+            <Box className="overview-mini-bar-track">
+              <Box className="overview-mini-bar-fill" data-tone={item.tone} style={{ height: `${height}%` }} />
+            </Box>
+            <Text size="xs" c="dimmed" ta="center">
+              {item.label}
+            </Text>
+          </Stack>
+        );
+      })}
+    </Box>
+  );
+}
+
+function SidebarNavigation({
+  activeSection,
+  onSelect
+}: {
+  activeSection: SectionKey;
+  onSelect: (section: SectionKey) => void;
+}) {
+  return (
+    <Stack gap="md">
+      {sectionGroups.map((group) => (
+        <Stack key={group.title} gap="xs">
+          <Text className="sidebar-section-title">{group.title}</Text>
+          <Stack gap={6}>
+            {group.items.map((sectionKey) => {
+              const item = sectionItems.find((entry) => entry.key === sectionKey);
+              if (!item) {
+                return null;
+              }
+
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.key}
+                  className="sidebar-link"
+                  active={activeSection === item.key}
+                  label={item.label}
+                  styles={{
+                    root: {
+                      borderRadius: "14px",
+                      padding: "10px 12px"
+                    },
+                    label: {
+                      fontWeight: 700
+                    }
+                  }}
+                  leftSection={
+                    <ThemeIcon
+                      variant={activeSection === item.key ? "light" : "default"}
+                      color={activeSection === item.key ? "orange" : "gray"}
+                      radius="md"
+                      size="lg"
+                    >
+                      <Icon size={18} />
+                    </ThemeIcon>
+                  }
+                  onClick={() => onSelect(item.key)}
+                />
+              );
+            })}
+          </Stack>
+        </Stack>
+      ))}
+    </Stack>
   );
 }
 
@@ -451,7 +614,8 @@ function ThemeToggle() {
 export default function App() {
   const [routeState, setRouteState] = useState<AppRoute>(() => readCurrentRoute());
   const adminBasePath = routeState.basePath;
-  const [navbarOpened, navbar] = useDisclosure(false);
+  const [mobileNavbarOpened, mobileNavbar] = useDisclosure(false);
+  const [desktopNavbarOpened, desktopNavbar] = useDisclosure(true);
 
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
@@ -465,6 +629,8 @@ export default function App() {
   const [summaryDays, setSummaryDays] = useState("7");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [overviewTickets, setOverviewTickets] = useState<Ticket[]>([]);
+  const [overviewTicketsBusy, setOverviewTicketsBusy] = useState(false);
 
   const [tickets, setTickets] = useState<TicketsList | null>(null);
   const [ticketsBusy, setTicketsBusy] = useState(false);
@@ -524,7 +690,7 @@ export default function App() {
 
   const openSection = useEffectEvent((section: SectionKey) => {
     navigate(section, null);
-    navbar.close();
+    mobileNavbar.close();
   });
 
   const openTicket = useEffectEvent((ticketID: number) => {
@@ -543,6 +709,7 @@ export default function App() {
 
       if (!payload.authenticated) {
         setSummary(null);
+        setOverviewTickets([]);
         setTickets(null);
         setSelectedTicketID(null);
         setSelectedTicket(null);
@@ -596,6 +763,29 @@ export default function App() {
     } finally {
       if (!silent) {
         setSummaryBusy(false);
+      }
+    }
+  });
+
+  const loadOverviewTickets = useEffectEvent(async (silent = false) => {
+    if (!silent) {
+      setOverviewTicketsBusy(true);
+    }
+    try {
+      const payload = await apiGet<TicketsList>("/api/admin/tickets?filter=open&page=1&pageSize=5");
+      setOverviewTickets(payload.items);
+    } catch (error) {
+      if (silent) {
+        return;
+      }
+      notifications.show({
+        color: "red",
+        title: "Failed to load live queue",
+        message: errorToMessage(error)
+      });
+    } finally {
+      if (!silent) {
+        setOverviewTicketsBusy(false);
       }
     }
   });
@@ -739,6 +929,7 @@ export default function App() {
 
     if (activeSection === "overview") {
       void loadSummary();
+      void loadOverviewTickets();
     }
     if (activeSection === "tickets") {
       void loadTickets();
@@ -786,6 +977,7 @@ export default function App() {
       switch (activeSection) {
         case "overview":
           void loadSummary(true);
+          void loadOverviewTickets(true);
           break;
         case "tickets":
           void loadTickets(true);
@@ -1337,84 +1529,69 @@ export default function App() {
   }
 
   const adminBootstrap = bootstrap;
-  const currentSection = sectionItems.find((item) => item.key === activeSection);
-  const pageTitle = activeSection === "tickets" && selectedTicket ? `Ticket #${selectedTicket.ticketNumber}` : currentSection?.label ?? "Overview";
+  const overviewPeriod = summary?.periodDays ?? Number(summaryDays);
+  const overviewClosureRate = summary ? ratioPercent(summary.closed, summary.opened) : 0;
+  const overviewArchiveShare = summary ? sharePercent(summary.totalClosed, summary.totalClosed + summary.currentlyOpen) : 0;
+  const overviewOpenShare = summary ? sharePercent(summary.currentlyOpen, summary.totalClosed + summary.currentlyOpen) : 0;
+  const overviewOpenedDaily = summary ? formatAverage(summary.opened / Math.max(summary.periodDays, 1)) : "0.0";
+  const overviewClosedDaily = summary ? formatAverage(summary.closed / Math.max(summary.periodDays, 1)) : "0.0";
+  const overviewBalance = summary ? summary.closed - summary.opened : 0;
+  const overviewBalanceLabel =
+    overviewBalance > 0 ? `+${overviewBalance}` : overviewBalance < 0 ? `${overviewBalance}` : "0";
+  const overviewHealthMessage = summary
+    ? overviewClosureRate >= 100
+      ? "The queue is being closed faster than new tickets arrive."
+      : overviewClosureRate >= 80
+        ? "Support is keeping close to the incoming ticket pace."
+        : "New load is arriving faster than it is being cleared."
+    : "";
+  const overviewChartData: MiniChartDatum[] = summary
+    ? [
+        { label: "Opened", value: summary.opened, tone: "orange" },
+        { label: "Closed", value: summary.closed, tone: "green" },
+        { label: "Open now", value: summary.currentlyOpen, tone: "gray" }
+      ]
+    : [];
 
   return (
     <AppShell
       className="app-shell"
-      header={{ height: 84 }}
-      navbar={{ width: 296, breakpoint: "sm", collapsed: { mobile: !navbarOpened } }}
+      navbar={{ width: 296, breakpoint: "sm", collapsed: { mobile: !mobileNavbarOpened, desktop: !desktopNavbarOpened } }}
       padding="md"
     >
-      <AppShell.Header p="xs">
-        <Paper className="app-header-frame" radius="xl">
-          <Group className="app-header-layout" h="100%" wrap="nowrap">
-            <Group className="app-header-main" wrap="nowrap" gap="md">
-              <Burger opened={navbarOpened} onClick={navbar.toggle} hiddenFrom="sm" size="sm" />
-              <Paper className="glass-panel header-brand" radius="xl">
-                <Group gap="sm" wrap="nowrap">
-                  <ThemeIcon variant="light" color="orange" radius="xl" size="lg">
-                    <IconSparkles size={18} />
-                  </ThemeIcon>
-                  <Text fw={700}>Support Ticket Bot</Text>
-                </Group>
-              </Paper>
-              <Title order={3} className="hero-title page-title">
-                {pageTitle}
-              </Title>
-            </Group>
-
-            <Group className="app-header-actions" gap="sm" wrap="nowrap">
-              <Paper className="glass-panel identity-chip" radius="xl" px="md" py="xs" visibleFrom="md">
-                <Text fw={600}>{adminBootstrap.user?.displayName}</Text>
-                {adminBootstrap.user?.username ? <Text size="xs" c="dimmed">@{adminBootstrap.user.username}</Text> : null}
-              </Paper>
-              <ThemeToggle />
-              <ActionIcon variant="default" color="orange" size="lg" onClick={() => void refreshBootstrap(false)}>
-                <IconRefresh size={18} />
-              </ActionIcon>
-              <Button variant="default" color="red" leftSection={<IconDoorExit size={16} />} loading={authBusy} onClick={handleLogout}>
-                Logout
-              </Button>
-            </Group>
-          </Group>
-        </Paper>
-      </AppShell.Header>
-
-      <AppShell.Navbar p="xs">
+      <AppShell.Navbar p="xs" withBorder={false}>
         <Paper className="app-navbar-frame" radius="xl">
           <Stack justify="space-between" h="100%">
             <Stack gap="md">
-              <Stack gap="xs">
-                {sectionItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <NavLink
-                      key={item.key}
-                      className="sidebar-link"
-                      active={activeSection === item.key}
-                      label={item.label}
-                      styles={{
-                        root: {
-                          borderRadius: "16px",
-                          padding: "10px 12px"
-                        },
-                        label: {
-                          fontWeight: 700
-                        }
-                      }}
-                      leftSection={
-                        <ThemeIcon variant={activeSection === item.key ? "filled" : "default"} color={activeSection === item.key ? "orange" : "gray"} radius="md" size="lg">
-                          <Icon size={18} />
-                        </ThemeIcon>
-                      }
-                      onClick={() => {
-                        openSection(item.key);
-                      }}
-                    />
-                  );
-                })}
+              <Paper className="sidebar-brand" radius="lg" p="md">
+                <Group justify="space-between" align="center" wrap="nowrap">
+                  <Group gap="sm" wrap="nowrap">
+                    <ThemeIcon className="sidebar-brand-icon" variant="light" color="orange" radius="xl" size={44}>
+                      <IconSparkles size={20} />
+                    </ThemeIcon>
+                    <Text fw={800}>Support Ticket Bot</Text>
+                  </Group>
+                  <Burger
+                    className="sidebar-brand-toggle"
+                    opened={mobileNavbarOpened}
+                    onClick={mobileNavbar.toggle}
+                    hiddenFrom="sm"
+                    size="sm"
+                  />
+                  <Burger
+                    className="sidebar-brand-toggle"
+                    opened={desktopNavbarOpened}
+                    onClick={desktopNavbar.toggle}
+                    visibleFrom="sm"
+                    size="sm"
+                  />
+                </Group>
+              </Paper>
+
+              <Divider className="sidebar-divider" />
+
+              <Stack gap="sm">
+                <SidebarNavigation activeSection={activeSection} onSelect={openSection} />
               </Stack>
             </Stack>
           </Stack>
@@ -1422,76 +1599,336 @@ export default function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Box className="content-shell" maw={1480} mx="auto" w="100%">
-          <Stack gap="md">
-            {activeSection === "overview" ? (
-              <Stack gap="md">
-                <Group justify="space-between" align="end">
-                  <Title order={2} className="hero-title">
-                    Dashboard
-                  </Title>
-                  <SegmentedControl
-                    value={summaryDays}
-                    onChange={setSummaryDays}
-                    data={[
-                      { label: "7 days", value: "7" },
-                      { label: "30 days", value: "30" },
-                      { label: "90 days", value: "90" }
-                    ]}
-                  />
-                </Group>
+        <Stack gap="md" w="100%">
+          <Group className="content-toolbar" justify="space-between" align="center" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap">
+              <Burger opened={mobileNavbarOpened} onClick={mobileNavbar.toggle} hiddenFrom="sm" size="sm" />
+              {!desktopNavbarOpened ? <Burger opened={desktopNavbarOpened} onClick={desktopNavbar.toggle} visibleFrom="sm" size="sm" /> : null}
+            </Group>
 
-              {summaryBusy && !summary ? (
-                <Center py="xl">
-                  <Loader color="orange" />
-                </Center>
+            <Group className="content-toolbar-actions" gap="sm" wrap="nowrap">
+              <Paper className="glass-panel identity-chip" radius="md" px={8} py={4} visibleFrom="md">
+                <Stack gap={0}>
+                  <Text size="xs" fw={700} lh={1.15}>
+                    {adminBootstrap.user?.displayName}
+                  </Text>
+                  {adminBootstrap.user?.username ? (
+                    <Text size="9px" c="dimmed" lh={1.05}>
+                      @{adminBootstrap.user.username}
+                    </Text>
+                  ) : null}
+                </Stack>
+              </Paper>
+              <ThemeToggle />
+              <ActionIcon variant="default" color="orange" size="lg" onClick={() => void refreshBootstrap(false)}>
+                <IconRefresh size={18} />
+              </ActionIcon>
+              <ActionIcon hiddenFrom="sm" variant="default" color="red" size="lg" loading={authBusy} onClick={handleLogout} aria-label="Logout">
+                <IconDoorExit size={18} />
+              </ActionIcon>
+              <Button visibleFrom="sm" variant="default" color="red" leftSection={<IconDoorExit size={16} />} loading={authBusy} onClick={handleLogout}>
+                Logout
+              </Button>
+            </Group>
+          </Group>
+
+          <Box className="content-shell" maw={1480} mx="auto" w="100%">
+            <Stack gap="md">
+              {activeSection === "overview" ? (
+                <Stack gap="md">
+                  <Group justify="space-between" align="end">
+                    <Title order={2} className="hero-title">
+                      Dashboard
+                    </Title>
+                    <SegmentedControl
+                      value={summaryDays}
+                      onChange={setSummaryDays}
+                      data={[
+                        { label: "7 days", value: "7" },
+                        { label: "30 days", value: "30" },
+                        { label: "90 days", value: "90" }
+                      ]}
+                    />
+                  </Group>
+
+                  {summaryBusy && !summary ? (
+                    <Center py="xl">
+                      <Loader color="orange" />
+                    </Center>
+                  ) : null}
+
+                  {summary ? (
+                    <>
+                      <SimpleGrid cols={{ base: 1, sm: 2, xl: 4 }} spacing="md">
+                        <StatCard label="Opened" value={summary.opened} tone="orange" icon={IconMessageCircle} />
+                        <StatCard label="Closed" value={summary.closed} tone="gray" icon={IconDoorExit} />
+                        <StatCard label="Currently open" value={summary.currentlyOpen} tone="orange" icon={IconSparkles} />
+                        <StatCard label="Total closed" value={summary.totalClosed} tone="gray" icon={IconChartBar} />
+                      </SimpleGrid>
+
+                      <Box className="overview-grid">
+                        <Paper className="glass-panel overview-panel overview-panel--wide" p="lg" radius="xl">
+                          <Stack gap="lg">
+                            <Group justify="space-between" align="start" wrap="nowrap">
+                              <Stack gap={4}>
+                                <Text className="section-caption">Flow overview</Text>
+                                <Title order={3} className="hero-title">
+                                  Support cadence
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  Selected window: {overviewPeriod} days
+                                </Text>
+                              </Stack>
+                              <Badge color={overviewBalance >= 0 ? "green" : "orange"} variant="light">
+                                {overviewBalanceLabel} balance
+                              </Badge>
+                            </Group>
+
+                            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+                              <Paper className="surface-muted overview-kpi" p="md" radius="lg">
+                                <Text className="section-caption">Closure rate</Text>
+                                <Title order={3} className="hero-title">
+                                  {overviewClosureRate}%
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  Closed against incoming volume
+                                </Text>
+                              </Paper>
+                              <Paper className="surface-muted overview-kpi" p="md" radius="lg">
+                                <Text className="section-caption">Opened / day</Text>
+                                <Title order={3} className="hero-title">
+                                  {overviewOpenedDaily}
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  Average new conversations per day
+                                </Text>
+                              </Paper>
+                              <Paper className="surface-muted overview-kpi" p="md" radius="lg">
+                                <Text className="section-caption">Closed / day</Text>
+                                <Title order={3} className="hero-title">
+                                  {overviewClosedDaily}
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  Average resolved conversations per day
+                                </Text>
+                              </Paper>
+                            </SimpleGrid>
+
+                            <Box className="overview-flow-layout">
+                              <OverviewMiniChart data={overviewChartData} />
+
+                              <Stack className="overview-meter-list" gap="md">
+                                <InsightMeter
+                                  label="Incoming load"
+                                  value={summary.opened}
+                                  total={Math.max(summary.opened, summary.closed, summary.currentlyOpen, 1)}
+                                  tone="orange"
+                                  helper="New tickets created in the active reporting window."
+                                />
+                                <InsightMeter
+                                  label="Resolved volume"
+                                  value={summary.closed}
+                                  total={Math.max(summary.opened, summary.closed, summary.currentlyOpen, 1)}
+                                  tone="green"
+                                  helper="Tickets closed during the same reporting window."
+                                />
+                                <InsightMeter
+                                  label="Live backlog"
+                                  value={summary.currentlyOpen}
+                                  total={Math.max(summary.opened, summary.closed, summary.currentlyOpen, 1)}
+                                  tone="gray"
+                                  helper="Conversations still waiting in the active queue."
+                                />
+                              </Stack>
+                            </Box>
+                          </Stack>
+                        </Paper>
+
+                        <Paper className="glass-panel overview-panel overview-panel--side" p="lg" radius="xl">
+                          <Stack gap="lg">
+                            <Stack gap={4}>
+                              <Text className="section-caption">Queue health</Text>
+                              <Title order={3} className="hero-title">
+                                Backlog status
+                              </Title>
+                              <Text size="sm" c="dimmed">
+                                {overviewHealthMessage}
+                              </Text>
+                            </Stack>
+
+                            <Stack gap={2}>
+                              <Title order={1} className="hero-title">
+                                {summary.currentlyOpen}
+                              </Title>
+                              <Text size="sm" c="dimmed">
+                                tickets are still open right now
+                              </Text>
+                            </Stack>
+
+                            <Stack gap="md">
+                              <InsightMeter
+                                label="Still open"
+                                value={summary.currentlyOpen}
+                                total={summary.currentlyOpen + summary.totalClosed}
+                                tone="orange"
+                                helper={`${overviewOpenShare}% of all handled tickets remain active.`}
+                              />
+                              <InsightMeter
+                                label="Archived closed"
+                                value={summary.totalClosed}
+                                total={summary.currentlyOpen + summary.totalClosed}
+                                tone="green"
+                                helper={`${overviewArchiveShare}% of all handled tickets are already resolved.`}
+                              />
+                            </Stack>
+
+                            <Paper className="surface-muted overview-callout" p="md" radius="lg">
+                              <Stack gap="sm">
+                                <Text fw={700}>Jump into the live queue</Text>
+                                <Text size="sm" c="dimmed">
+                                  Open the ticket workspace and continue from the freshest conversations.
+                                </Text>
+                                <Button variant="light" color="orange" leftSection={<IconMessageCircle size={16} />} onClick={() => openSection("tickets")}>
+                                  Open live tickets
+                                </Button>
+                              </Stack>
+                            </Paper>
+                          </Stack>
+                        </Paper>
+
+                        <Paper className="glass-panel overview-panel overview-panel--wide" p="lg" radius="xl">
+                          <Stack gap="md">
+                            <Group justify="space-between" align="center" wrap="nowrap">
+                              <Stack gap={4}>
+                                <Text className="section-caption">Live workspace</Text>
+                                <Title order={3} className="hero-title">
+                                  Recent open tickets
+                                </Title>
+                              </Stack>
+                              <Button variant="default" color="gray" rightSection={<IconArrowRight size={14} />} onClick={() => openSection("tickets")}>
+                                All tickets
+                              </Button>
+                            </Group>
+
+                            {overviewTicketsBusy && overviewTickets.length === 0 ? (
+                              <Center py="xl">
+                                <Loader color="orange" />
+                              </Center>
+                            ) : null}
+
+                            {overviewTickets.length > 0 ? (
+                              <Stack gap="sm">
+                                {overviewTickets.map((ticket) => (
+                                  <Paper
+                                    key={ticket.id}
+                                    className="surface-muted overview-ticket-row"
+                                    p="md"
+                                    radius="lg"
+                                    onClick={() => openTicket(ticket.id)}
+                                  >
+                                    <Group className="overview-ticket-layout" justify="space-between" align="center" wrap="nowrap">
+                                      <Stack gap={6} className="overview-ticket-copy">
+                                        <Group gap="xs">
+                                          <Badge color={statusColor(ticket.status)} variant="light">
+                                            {ticket.status}
+                                          </Badge>
+                                          <Badge color={priorityColor(ticket.priority)} variant="dot">
+                                            {ticket.priority}
+                                          </Badge>
+                                        </Group>
+                                        <Text fw={700}>
+                                          #{ticket.ticketNumber} · {ticket.displayName}
+                                        </Text>
+                                        {ticket.subject ? (
+                                          <Text size="sm" c="dimmed">
+                                            {ticket.subject}
+                                          </Text>
+                                        ) : null}
+                                      </Stack>
+
+                                      <Stack gap={8} align="end" className="overview-ticket-meta">
+                                        <Text size="xs" c="dimmed" ta="right">
+                                          Updated {formatDateTime(ticket.updatedAt)}
+                                        </Text>
+                                        <Button
+                                          variant="subtle"
+                                          color="orange"
+                                          rightSection={<IconArrowRight size={14} />}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            openTicket(ticket.id);
+                                          }}
+                                        >
+                                          Open
+                                        </Button>
+                                      </Stack>
+                                    </Group>
+                                  </Paper>
+                                ))}
+                              </Stack>
+                            ) : null}
+
+                            {!overviewTicketsBusy && overviewTickets.length === 0 ? (
+                              <Alert radius="lg" color="gray" variant="light" title="No open tickets right now">
+                                The queue is clear for the moment. Fresh conversations will show up here automatically.
+                              </Alert>
+                            ) : null}
+                          </Stack>
+                        </Paper>
+
+                        <Paper className="glass-panel overview-panel overview-panel--side" p="lg" radius="xl">
+                          <Stack gap="lg">
+                            <Stack gap={4}>
+                              <Text className="section-caption">Operations snapshot</Text>
+                              <Title order={3} className="hero-title">
+                                Team rhythm
+                              </Title>
+                            </Stack>
+
+                            <SimpleGrid cols={1} spacing="sm">
+                              <Paper className="surface-muted overview-kpi" p="md" radius="lg">
+                                <Text className="section-caption">Window size</Text>
+                                <Title order={3} className="hero-title">
+                                  {overviewPeriod}d
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  The active range used for all dashboard metrics
+                                </Text>
+                              </Paper>
+                              <Paper className="surface-muted overview-kpi" p="md" radius="lg">
+                                <Text className="section-caption">Load swing</Text>
+                                <Title order={3} className="hero-title">
+                                  {overviewBalanceLabel}
+                                </Title>
+                                <Text size="sm" c="dimmed">
+                                  Positive means the queue is shrinking, negative means it is growing
+                                </Text>
+                              </Paper>
+                            </SimpleGrid>
+
+                            <Stack gap="md">
+                              <InsightMeter
+                                label="Closure coverage"
+                                value={Math.min(overviewClosureRate, 100)}
+                                total={100}
+                                tone="green"
+                                helper="How much of the incoming ticket flow was closed in the selected range."
+                              />
+                              <InsightMeter
+                                label="Archive depth"
+                                value={overviewArchiveShare}
+                                total={100}
+                                tone="gray"
+                                helper="Share of all handled tickets that already live in the closed archive."
+                              />
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      </Box>
+                    </>
+                  ) : null}
+                </Stack>
               ) : null}
-
-              {summary ? (
-                <>
-                  <SimpleGrid cols={{ base: 1, sm: 2, xl: 4 }} spacing="md">
-                    <StatCard label="Opened" value={summary.opened} tone="orange" />
-                    <StatCard label="Closed" value={summary.closed} tone="gray" />
-                    <StatCard label="Currently open" value={summary.currentlyOpen} tone="orange" />
-                    <StatCard label="Total closed" value={summary.totalClosed} tone="gray" />
-                  </SimpleGrid>
-
-                  <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-                    <Paper className="glass-panel" p="md" radius="xl">
-                      <Stack gap="md">
-                        <Title order={3} className="hero-title">
-                          {adminBootstrap.user?.displayName}
-                        </Title>
-                        <Group>
-                          {adminBootstrap.methods.password ? <Badge color="gray">Password</Badge> : null}
-                          {adminBootstrap.methods.passkey ? <Badge color="orange">Passkey</Badge> : null}
-                          {adminBootstrap.methods.telegram ? <Badge color="orange">Telegram</Badge> : null}
-                          {adminBootstrap.methods.github ? <Badge color="gray">GitHub</Badge> : null}
-                        </Group>
-                      </Stack>
-                    </Paper>
-
-                    <Paper className="glass-panel" p="md" radius="xl">
-                      <Stack gap="md">
-                        <Title order={3} className="hero-title">
-                          Quick actions
-                        </Title>
-                        <Button variant="default" color="gray" leftSection={<IconMessageCircle size={16} />} onClick={() => openSection("tickets")}>
-                          Open ticket workspace
-                        </Button>
-                        <Button variant="default" color="gray" leftSection={<IconKey size={16} />} onClick={() => openSection("security")}>
-                          Manage passkeys
-                        </Button>
-                        <Button variant="default" color="gray" leftSection={<IconMessageCircleBolt size={16} />} onClick={() => openSection("canned")}>
-                          Review canned replies
-                        </Button>
-                      </Stack>
-                    </Paper>
-                  </SimpleGrid>
-                </>
-              ) : null}
-              </Stack>
-            ) : null}
 
             {activeSection === "tickets" ? (
               <Box className="ticket-layout">
@@ -2151,6 +2588,7 @@ export default function App() {
             ) : null}
           </Stack>
         </Box>
+        </Stack>
       </AppShell.Main>
     </AppShell>
   );

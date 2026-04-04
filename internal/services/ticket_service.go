@@ -373,11 +373,14 @@ func waitForTopicPropagation(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
-	// Build message text with user info header
-	displayName := ticket.GetDisplayName()
-	header := fmt.Sprintf("📩 <b>From:</b> %s (ID: <code>%d</code>)\n\n", utils.EscapeHTML(displayName), ticket.UserID)
+func escapedTelegramCaption(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return utils.EscapeHTML(text)
+}
 
+func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message) (*models.Message, error) {
 	var sentMsg *models.Message
 	var err error
 
@@ -386,45 +389,33 @@ func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, tic
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
-			Text:            header + utils.EscapeHTML(message.Text),
+			Text:            utils.EscapeHTML(message.Text),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Photo != nil && len(message.Photo) > 0 {
 		// Get the largest photo
 		photo := message.Photo[len(message.Photo)-1]
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
 			Photo:           &models.InputFileString{Data: photo.FileID},
-			Caption:         caption,
+			Caption:         escapedTelegramCaption(message.Caption),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Document != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendDocument(ctx, &bot.SendDocumentParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
 			Document:        &models.InputFileString{Data: message.Document.FileID},
-			Caption:         caption,
+			Caption:         escapedTelegramCaption(message.Caption),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Video != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendVideo(ctx, &bot.SendVideoParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
 			Video:           &models.InputFileString{Data: message.Video.FileID},
-			Caption:         caption,
+			Caption:         escapedTelegramCaption(message.Caption),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Voice != nil {
@@ -432,29 +423,18 @@ func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, tic
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
 			Voice:           &models.InputFileString{Data: message.Voice.FileID},
-			Caption:         header,
+			Caption:         escapedTelegramCaption(message.Caption),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Audio != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += message.Caption
-		}
 		sentMsg, err = b.SendAudio(ctx, &bot.SendAudioParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
 			Audio:           &models.InputFileString{Data: message.Audio.FileID},
-			Caption:         caption,
+			Caption:         escapedTelegramCaption(message.Caption),
 			ParseMode:       models.ParseModeHTML,
 		})
 	} else if message.Sticker != nil {
-		// Send header first, then sticker
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          ticket.SupportChatID,
-			MessageThreadID: int(ticket.ThreadID),
-			Text:            header + "📎 Sticker:",
-			ParseMode:       models.ParseModeHTML,
-		})
 		sentMsg, err = b.SendSticker(ctx, &bot.SendStickerParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
@@ -471,7 +451,7 @@ func (s *TicketService) sendMessageToThread(ctx context.Context, b *bot.Bot, tic
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          ticket.SupportChatID,
 			MessageThreadID: int(ticket.ThreadID),
-			Text:            header + "<i>📎 Unsupported message type</i>",
+			Text:            "<i>📎 Unsupported message type</i>",
 			ParseMode:       models.ParseModeHTML,
 		})
 	}
@@ -531,8 +511,6 @@ func (s *TicketService) ForwardMessageToThread(ctx context.Context, b *bot.Bot, 
 
 // ForwardReplyToUser forwards an admin reply to the user
 func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, ticket *database.Ticket, message *models.Message, adminName string) (*models.Message, error) {
-	header := fmt.Sprintf("💬 <b>Support Reply</b> (Ticket #%s)\n\n", ticket.TicketNumber)
-
 	var sentMsg *models.Message
 	var err error
 
@@ -540,77 +518,51 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	if message.Text != "" {
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    ticket.UserID,
-			Text:      header + utils.EscapeHTML(message.Text),
+			Text:      utils.EscapeHTML(message.Text),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Photo != nil && len(message.Photo) > 0 {
 		photo := message.Photo[len(message.Photo)-1]
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
 			ChatID:    ticket.UserID,
 			Photo:     &models.InputFileString{Data: photo.FileID},
-			Caption:   caption,
+			Caption:   escapedTelegramCaption(message.Caption),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Document != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendDocument(ctx, &bot.SendDocumentParams{
 			ChatID:    ticket.UserID,
 			Document:  &models.InputFileString{Data: message.Document.FileID},
-			Caption:   caption,
+			Caption:   escapedTelegramCaption(message.Caption),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Video != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += utils.EscapeHTML(message.Caption)
-		}
 		sentMsg, err = b.SendVideo(ctx, &bot.SendVideoParams{
 			ChatID:    ticket.UserID,
 			Video:     &models.InputFileString{Data: message.Video.FileID},
-			Caption:   caption,
+			Caption:   escapedTelegramCaption(message.Caption),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Voice != nil {
 		sentMsg, err = b.SendVoice(ctx, &bot.SendVoiceParams{
 			ChatID:    ticket.UserID,
 			Voice:     &models.InputFileString{Data: message.Voice.FileID},
-			Caption:   header,
+			Caption:   escapedTelegramCaption(message.Caption),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Audio != nil {
-		caption := header
-		if message.Caption != "" {
-			caption += message.Caption
-		}
 		sentMsg, err = b.SendAudio(ctx, &bot.SendAudioParams{
 			ChatID:    ticket.UserID,
 			Audio:     &models.InputFileString{Data: message.Audio.FileID},
-			Caption:   caption,
+			Caption:   escapedTelegramCaption(message.Caption),
 			ParseMode: models.ParseModeHTML,
 		})
 	} else if message.Sticker != nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    ticket.UserID,
-			Text:      header,
-			ParseMode: models.ParseModeHTML,
-		})
 		sentMsg, err = b.SendSticker(ctx, &bot.SendStickerParams{
 			ChatID:  ticket.UserID,
 			Sticker: &models.InputFileString{Data: message.Sticker.FileID},
 		})
 	} else if message.VideoNote != nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:    ticket.UserID,
-			Text:      header,
-			ParseMode: models.ParseModeHTML,
-		})
 		sentMsg, err = b.SendVideoNote(ctx, &bot.SendVideoNoteParams{
 			ChatID:    ticket.UserID,
 			VideoNote: &models.InputFileString{Data: message.VideoNote.FileID},
@@ -618,7 +570,7 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 	} else {
 		sentMsg, err = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    ticket.UserID,
-			Text:      header + "<i>📎 Unsupported message type</i>",
+			Text:      "<i>📎 Unsupported message type</i>",
 			ParseMode: models.ParseModeHTML,
 		})
 	}
@@ -628,10 +580,9 @@ func (s *TicketService) ForwardReplyToUser(ctx context.Context, b *bot.Bot, tick
 
 // SendSupportTextToUser sends an HTML-formatted support reply body to the user.
 func (s *TicketService) SendSupportTextToUser(ctx context.Context, b *bot.Bot, ticket *database.Ticket, htmlBody string) (*models.Message, error) {
-	text := fmt.Sprintf("💬 <b>Support Reply</b> (Ticket #%s)\n\n%s", ticket.TicketNumber, htmlBody)
 	return b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:    ticket.UserID,
-		Text:      text,
+		Text:      htmlBody,
 		ParseMode: models.ParseModeHTML,
 	})
 }

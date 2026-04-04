@@ -29,8 +29,8 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 
 # Frontend build artifacts
 web/admin-ui/node_modules/

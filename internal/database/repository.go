@@ -324,7 +324,27 @@ func (r *Repository) CreateTicketMessage(ctx context.Context, msg *TicketMessage
 
 // GetTicketMessages retrieves all messages for a ticket
 func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*TicketMessage, error) {
-	query := `SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC`
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			sender_id,
+			sender_name,
+			sender_username,
+			is_admin,
+			message_text,
+			message_id,
+			original_message_id,
+			has_media,
+			media_type,
+			media_file_id,
+			media_file_name,
+			media_mime_type,
+			created_at
+		FROM ticket_messages
+		WHERE ticket_id = $1
+		ORDER BY created_at ASC
+	`
 	rows, err := pool.Query(ctx, query, ticketID)
 	if err != nil {
 		return nil, err
@@ -350,7 +370,27 @@ func (r *Repository) GetTicketMessages(ctx context.Context, ticketID int) ([]*Ti
 
 // GetTicketMessage retrieves a single message by ticket and message ID.
 func (r *Repository) GetTicketMessage(ctx context.Context, ticketID int, messageID int) (*TicketMessage, error) {
-	query := `SELECT * FROM ticket_messages WHERE ticket_id = $1 AND id = $2 LIMIT 1`
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			sender_id,
+			sender_name,
+			sender_username,
+			is_admin,
+			message_text,
+			message_id,
+			original_message_id,
+			has_media,
+			media_type,
+			media_file_id,
+			media_file_name,
+			media_mime_type,
+			created_at
+		FROM ticket_messages
+		WHERE ticket_id = $1 AND id = $2
+		LIMIT 1
+	`
 
 	var msg TicketMessage
 	err := pool.QueryRow(ctx, query, ticketID, messageID).Scan(

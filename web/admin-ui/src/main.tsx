@@ -3,6 +3,10 @@ import { Notifications } from "@mantine/notifications";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import "@fontsource/manrope/400.css";
+import "@fontsource/manrope/500.css";
+import "@fontsource/manrope/600.css";
+import "@fontsource/manrope/700.css";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
@@ -11,12 +15,14 @@ import "./styles.css";
 
 const theme = createTheme({
   primaryColor: "orange",
+  primaryShade: 8,
   defaultRadius: "md",
-  fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  cursorType: "pointer",
+  fontFamily: '"Manrope", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   headings: {
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    fontWeight: "700"
+    fontFamily: '"Manrope", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontWeight: "800"
   },
   components: {
     Button: {
@@ -27,7 +33,8 @@ const theme = createTheme({
     },
     ActionIcon: {
       defaultProps: {
-        radius: "md"
+        radius: "md",
+        variant: "default"
       }
     },
     TextInput: {

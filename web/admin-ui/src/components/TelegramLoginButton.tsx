@@ -91,7 +91,7 @@ export function TelegramLoginButton({ botID, botUsername, onAuth, disabled = fal
       <Button
         fullWidth
         variant="filled"
-        color="blue"
+        color="orange"
         className="service-button service-button--telegram"
         title={`Continue with @${botUsername}`}
         leftSection={<IconBrandTelegram size={16} />}

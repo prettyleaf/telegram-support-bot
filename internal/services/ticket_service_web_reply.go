@@ -205,12 +205,8 @@ func (s *TicketService) sendSupportUploadToThread(
 	}
 }
 
-func buildSupportUserBody(ticket *database.Ticket, htmlBody string) string {
-	prefix := fmt.Sprintf("💬 <b>Support Reply</b> (Ticket #%s)", utils.EscapeHTML(ticket.TicketNumber))
-	if strings.TrimSpace(htmlBody) == "" {
-		return prefix
-	}
-	return prefix + "\n\n" + htmlBody
+func buildSupportUserBody(_ *database.Ticket, htmlBody string) string {
+	return htmlBody
 }
 
 func buildSupportThreadBody(adminName string, htmlBody string) string {
