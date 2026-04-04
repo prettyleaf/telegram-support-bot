@@ -223,9 +223,9 @@ function statusColor(status: string) {
 function priorityColor(priority: string) {
   switch (priority) {
     case "low":
-      return "gray";
+      return "blue";
     case "normal":
-      return "orange";
+      return "green";
     case "high":
       return "yellow";
     case "urgent":
@@ -446,6 +446,14 @@ function StatCard({ label, value, tone, icon: Icon }: StatCardProps) {
         </ThemeIcon>
       </Group>
     </Paper>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: string }) {
+  return (
+    <Badge className="priority-badge" data-priority={priority} color={priorityColor(priority)} variant="light">
+      {priority}
+    </Badge>
   );
 }
 
@@ -1832,9 +1840,7 @@ export default function App() {
                                           <Badge color={statusColor(ticket.status)} variant="light">
                                             {ticket.status}
                                           </Badge>
-                                          <Badge color={priorityColor(ticket.priority)} variant="dot">
-                                            {ticket.priority}
-                                          </Badge>
+                                          <PriorityBadge priority={ticket.priority} />
                                         </Group>
                                         <Text fw={700}>
                                           #{ticket.ticketNumber} · {ticket.displayName}
@@ -2004,9 +2010,7 @@ export default function App() {
                                   <Badge color={statusColor(ticket.status)} variant="light">
                                     {ticket.status}
                                   </Badge>
-                                  <Badge color={priorityColor(ticket.priority)} variant="dot">
-                                    {ticket.priority}
-                                  </Badge>
+                                  <PriorityBadge priority={ticket.priority} />
                                 </Stack>
                               </Group>
 
@@ -2176,9 +2180,7 @@ export default function App() {
                           <Badge color={statusColor(selectedTicket.status)} variant="light">
                             {selectedTicket.status}
                           </Badge>
-                          <Badge color={priorityColor(selectedTicket.priority)} variant="dot">
-                            {selectedTicket.priority}
-                          </Badge>
+                          <PriorityBadge priority={selectedTicket.priority} />
                           <Badge variant="outline">User ID {selectedTicket.userId}</Badge>
                         </Group>
 
