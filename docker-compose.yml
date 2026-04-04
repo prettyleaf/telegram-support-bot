@@ -5,8 +5,7 @@ services:
     image: support-ticket-bot:${BOT_VERSION:?set BOT_VERSION in .env to the loaded image tag}
     container_name: support-ticket-bot
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
     environment:
       VALKEY_ADDR: ${VALKEY_ADDR:-/run/support-ticket-valkey/valkey.sock}
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
@@ -17,7 +16,7 @@ services:
       support-ticket-valkey:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - valkey_socket:/run/support-ticket-valkey
@@ -72,4 +71,5 @@ volumes:
 
 networks:
   support-ticket-bot:
+    name: support-ticket-bot
     driver: bridge

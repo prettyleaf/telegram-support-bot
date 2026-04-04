@@ -93,6 +93,29 @@ var (
 	YAMLCfg *YAMLConfig
 )
 
+func normalizeWebAdminBasePath(rawBasePath, publicURL string) string {
+	basePath := strings.TrimSpace(rawBasePath)
+	if basePath == "" {
+		basePath = inferWebAdminBasePath(publicURL)
+	}
+	if !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+	basePath = strings.TrimRight(basePath, "/")
+	if basePath == "" {
+		return "/"
+	}
+	return basePath
+}
+
+func inferWebAdminBasePath(publicURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(publicURL))
+	if err != nil || parsed.Path == "" {
+		return "/"
+	}
+	return parsed.Path
+}
+
 func Load() error {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		fmt.Printf("Warning: failed to load .env: %v\n", err)
@@ -171,17 +194,7 @@ func Load() error {
 		Cfg.WebAdmin.ListenAddr = ":8080"
 	}
 	Cfg.WebAdmin.PublicURL = strings.TrimRight(strings.TrimSpace(os.Getenv("WEB_ADMIN_PUBLIC_URL")), "/")
-	Cfg.WebAdmin.BasePath = strings.TrimSpace(os.Getenv("WEB_ADMIN_BASE_PATH"))
-	if Cfg.WebAdmin.BasePath == "" {
-		Cfg.WebAdmin.BasePath = "/admin"
-	}
-	if !strings.HasPrefix(Cfg.WebAdmin.BasePath, "/") {
-		Cfg.WebAdmin.BasePath = "/" + Cfg.WebAdmin.BasePath
-	}
-	Cfg.WebAdmin.BasePath = strings.TrimRight(Cfg.WebAdmin.BasePath, "/")
-	if Cfg.WebAdmin.BasePath == "" {
-		Cfg.WebAdmin.BasePath = "/admin"
-	}
+	Cfg.WebAdmin.BasePath = normalizeWebAdminBasePath(os.Getenv("WEB_ADMIN_BASE_PATH"), Cfg.WebAdmin.PublicURL)
 	Cfg.WebAdmin.SessionCookieName = strings.TrimSpace(os.Getenv("WEB_ADMIN_SESSION_COOKIE_NAME"))
 	if Cfg.WebAdmin.SessionCookieName == "" {
 		Cfg.WebAdmin.SessionCookieName = "support_admin_session"

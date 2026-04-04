@@ -75,4 +75,5 @@ volumes:
 
 networks:
   support-ticket-bot:
+    name: support-ticket-bot
     driver: bridge
