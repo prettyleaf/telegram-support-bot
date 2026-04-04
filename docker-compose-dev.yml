@@ -1,0 +1,78 @@
+name: support-ticket-bot
+
+services:
+  support-ticket-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+#    image: support-ticket-bot:${BOT_VERSION:?set BOT_VERSION in .env to the loaded image tag}
+    container_name: support-ticket-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VALKEY_ADDR: ${VALKEY_ADDR:-/run/support-ticket-valkey/valkey.sock}
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+      VALKEY_DB: ${VALKEY_DB:-0}
+    depends_on:
+      support-ticket-postgres:
+        condition: service_healthy
+      support-ticket-valkey:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - valkey_socket:/run/support-ticket-valkey
+    networks:
+      - support-ticket-bot
+
+  support-ticket-postgres:
+    image: postgres:18-alpine
+    container_name: support-ticket-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - support-ticket-bot
+
+  support-ticket-valkey:
+    image: valkey/valkey:9-alpine
+    container_name: support-ticket-valkey
+    hostname: support-ticket-valkey
+    restart: unless-stopped
+    command: >
+      sh -c 'mkdir -p /run/support-ticket-valkey &&
+      valkey-server
+      --save ""
+      --appendonly no
+      --maxmemory-policy noeviction
+      --loglevel warning
+      --unixsocket /run/support-ticket-valkey/valkey.sock
+      --unixsocketperm 770'
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-s", "/run/support-ticket-valkey/valkey.sock", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - valkey_socket:/run/support-ticket-valkey
+    networks:
+      - support-ticket-bot
+
+volumes:
+  postgres_data:
+  valkey_socket:
+
+networks:
+  support-ticket-bot:
+    driver: bridge
