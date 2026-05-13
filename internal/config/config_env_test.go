@@ -25,3 +25,52 @@ func TestGetOptionalIntEnvParsesValue(t *testing.T) {
 		t.Fatalf("expected 42, got %d", value)
 	}
 }
+
+func TestNormalizeWebAdminBasePath(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		publicURL string
+		want      string
+	}{
+		{
+			name:      "explicit admin path",
+			raw:       "/admin",
+			publicURL: "https://support.example.com",
+			want:      "/admin",
+		},
+		{
+			name:      "explicit root path",
+			raw:       "/",
+			publicURL: "https://support.example.com/admin",
+			want:      "/",
+		},
+		{
+			name:      "infer admin path from public url",
+			raw:       "",
+			publicURL: "https://support.example.com/admin",
+			want:      "/admin",
+		},
+		{
+			name:      "infer root path from public url",
+			raw:       "",
+			publicURL: "https://support.example.com",
+			want:      "/",
+		},
+		{
+			name:      "add leading slash and trim trailing slash",
+			raw:       "admin/",
+			publicURL: "https://support.example.com",
+			want:      "/admin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeWebAdminBasePath(tt.raw, tt.publicURL)
+			if got != tt.want {
+				t.Fatalf("normalizeWebAdminBasePath(%q, %q) = %q, want %q", tt.raw, tt.publicURL, got, tt.want)
+			}
+		})
+	}
+}

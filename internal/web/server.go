@@ -29,6 +29,13 @@ type contextKey string
 
 const adminUserContextKey contextKey = "web_admin_user"
 
+func adminIndexPath(basePath string) string {
+	if strings.TrimSpace(basePath) == "" || basePath == "/" {
+		return "/"
+	}
+	return strings.TrimRight(basePath, "/") + "/"
+}
+
 type Server struct {
 	cfg         *config.Config
 	deps        *types.Dependencies
@@ -142,33 +149,46 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/banned", s.withAdmin(s.handleBannedCreate))
 	mux.HandleFunc("DELETE /api/admin/banned/{userID}", s.withAdmin(s.handleBannedDelete))
 
+	if s.cfg.WebAdmin.BasePath == "/" {
+		mux.Handle("/", s.staticHandler())
+		return
+	}
+
 	mux.Handle(s.cfg.WebAdmin.BasePath+"/", s.staticHandler())
 	if s.cfg.WebAdmin.BasePath != "/" {
 		mux.HandleFunc("GET "+s.cfg.WebAdmin.BasePath, func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, s.cfg.WebAdmin.BasePath+"/", http.StatusTemporaryRedirect)
+			http.Redirect(w, r, adminIndexPath(s.cfg.WebAdmin.BasePath), http.StatusTemporaryRedirect)
 		})
 	}
 }
 
 func (s *Server) staticHandler() http.Handler {
 	distDir := filepath.Join("web", "admin-ui", "dist")
-	fs := http.FileServer(http.Dir(distDir))
+	indexFile := filepath.Join(distDir, "index.html")
+	routeBasePath := s.cfg.WebAdmin.BasePath
+	if routeBasePath == "/" {
+		routeBasePath = ""
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, s.cfg.WebAdmin.BasePath)
-		if path == "" || path == "/" {
-			http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+		path := r.URL.Path
+		if routeBasePath != "" {
+			path = strings.TrimPrefix(path, routeBasePath)
+		}
+
+		clean := strings.TrimPrefix(filepath.Clean("/"+path), "/")
+		if clean == "" || clean == "." {
+			http.ServeFile(w, r, indexFile)
 			return
 		}
 
-		clean := strings.TrimPrefix(path, "/")
 		target := filepath.Join(distDir, clean)
 		if info, err := os.Stat(target); err == nil && !info.IsDir() {
-			http.StripPrefix(s.cfg.WebAdmin.BasePath+"/", fs).ServeHTTP(w, r)
+			http.ServeFile(w, r, target)
 			return
 		}
 
-		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+		http.ServeFile(w, r, indexFile)
 	})
 }
 

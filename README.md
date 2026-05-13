@@ -125,8 +125,9 @@ No generic OAuth, Keycloak, Pocket ID, or Yandex auth is included.
 ```env
 WEB_ADMIN_ENABLED=true
 WEB_ADMIN_LISTEN_ADDR=:8080
-WEB_ADMIN_PUBLIC_URL=https://support.example.com/admin
-WEB_ADMIN_BASE_PATH=/admin
+WEB_ADMIN_PUBLIC_URL=https://support.example.com
+# Optional. Defaults to the path part of WEB_ADMIN_PUBLIC_URL, or / when there is none.
+# WEB_ADMIN_BASE_PATH=/
 WEB_ADMIN_SESSION_COOKIE_NAME=support_admin_session
 WEB_ADMIN_SESSION_TTL_HOURS=168
 
@@ -153,6 +154,7 @@ VALKEY_DB=0
 Notes:
 
 - `WEB_ADMIN_PUBLIC_URL` should be the public admin URL that users actually open in the browser.
+- `WEB_ADMIN_BASE_PATH` is optional. If you omit it, the app uses the path from `WEB_ADMIN_PUBLIC_URL`; if the URL has no path, the admin UI is served from `/`.
 - Passkeys derive RP ID and allowed origin from `WEB_ADMIN_PUBLIC_URL`.
 - GitHub auth requires at least one allowlist entry in `WEB_AUTH_GITHUB_ALLOWED_EMAILS` or `WEB_AUTH_GITHUB_ALLOWED_LOGINS`.
 - If `WEB_AUTH_TELEGRAM_ALLOWED_IDS` is empty, `ADMIN_IDS` is used automatically.
@@ -160,14 +162,44 @@ Notes:
 
 ### Reverse proxy
 
-The bot container listens on `:8080` for the web admin. In Docker Compose the service exposes port `8080` to the internal Docker network, so a reverse proxy container can reach it as `http://support-ticket-bot:8080`.
+The bot container listens on `:8080` for the web admin. In Docker Compose the service is reachable on the shared Docker network as `http://support-ticket-bot:8080`.
 
-Proxy both of these paths to the bot container:
+Always proxy `/api/admin/` to the bot container.
 
-- `/admin/`
-- `/api/admin/`
+For the frontend path:
 
-Example Nginx location blocks:
+- proxy `/` when `WEB_ADMIN_PUBLIC_URL` is on the domain root or `WEB_ADMIN_BASE_PATH=/`
+- proxy `/admin/` when `WEB_ADMIN_PUBLIC_URL` uses `/admin`
+
+If SWAG runs in a different Compose stack, attach it to the same Docker network first. This repository now creates that network with the fixed name `support-ticket-bot`, so SWAG can join it as an external network:
+
+```yaml
+networks:
+  support-ticket-bot:
+    external: true
+```
+
+Then add that network to the SWAG service and use `proxy_pass http://support-ticket-bot:8080;`.
+
+Example Nginx location blocks for root deployment:
+
+```nginx
+location / {
+    proxy_pass http://support-ticket-bot:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /api/admin/ {
+    proxy_pass http://support-ticket-bot:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Example Nginx location blocks for `/admin` deployment:
 
 ```nginx
 location /admin/ {

@@ -250,7 +250,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, s.cfg.WebAdmin.BasePath+"/", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, adminIndexPath(s.cfg.WebAdmin.BasePath), http.StatusTemporaryRedirect)
 }
 
 func (s *Server) handleTelegramVerify(w http.ResponseWriter, r *http.Request) {
